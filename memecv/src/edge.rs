@@ -8,6 +8,16 @@ pub struct Detection {
     edges: Vec<Vec<Edge>>,
 }
 
+impl Detection {
+    fn width(&self) -> usize {
+        self.edges.len()
+    }
+
+    fn height(&self) -> usize {
+        self.edges.first().unwrap().len()
+    }
+}
+
 #[derive(Copy, Clone)]
 pub struct Edge {
     vec_x: f32,
@@ -41,8 +51,8 @@ impl Edge {
     }
 }
 
-pub fn canny(image: image::GrayImage, sigma: f32, strong_threshold: f32, weak_threshold: f32) -> Detection {
-    let edges = detect_edges(&image, sigma);
+pub fn canny<T: Into<image::GrayImage>>(image: T, sigma: f32, strong_threshold: f32, weak_threshold: f32) -> Detection {
+    let edges = detect_edges(image, sigma);
     let edges = minmax_suppression(&edges);
     let edges = hysteresis(&edges, strong_threshold, weak_threshold);
     Detection { edges }
@@ -79,7 +89,8 @@ fn neighbour_pos_delta(theta: f32) -> (i32, i32) {
 /// Computes the edges in an image using the Canny Method.
 ///
 /// `sigma` determines the radius of the Gaussian kernel.
-fn detect_edges(image: &image::GrayImage, sigma: f32) -> Vec<Vec<Edge>> {
+fn detect_edges<T: Into<image::GrayImage>>(image: T, sigma: f32) -> Vec<Vec<Edge>> {
+    let image = image.into();
     let (width, height) = (image.width() as usize, image.height() as usize);
     let mut edges: Vec<Vec<Edge>> = vec![vec![Edge::new(0.0, 0.0); height]; width];
     let kernel_size = kernel_size(sigma);
@@ -151,6 +162,7 @@ fn minmax_suppression(edges: &Vec<Vec<Edge>>) -> Vec<Vec<Edge>> {
                 };
                 let nb_mag = nb_a_magnitude * n + nb_b_magnitude * (1.0 - n);
                 magnitude_exceeded || edge.magnitude < nb_mag
+                // TODO: handle equal magnitudes for neighbours
             });
             if !magnitude_exceeded {
                 edges_out[x][y] = edge
@@ -226,8 +238,21 @@ fn edges_to_image(edges: &Vec<Vec<Edge>>) -> image::GrayImage {
 mod tests {
     use super::*;
 
+    fn canny_output_stages<T: AsRef<str>>(path: T) -> Detection {
+        let path = path.as_ref();
+        let image = image::open(path).unwrap();
+        let edges = detect_edges(image.to_luma(), 1.0);
+        edges_to_image(&edges).save(format!("{}.0-edges.png", path)).unwrap();
+        let edges = minmax_suppression(&edges);
+        edges_to_image(&edges).save(format!("{}.1-minmax.png", path)).unwrap();
+        let edges = hysteresis(&edges, 0.4, 0.05);
+        edges_to_image(&edges).save(format!("{}.2-hysteresis.png", path)).unwrap();
+        Detection { edges }
+    }
+
     #[test]
     fn kernel_integral_in_bounds() {
+        // The integral for the filter kernel should approximate 0.
         for sigma_i in 1..200 {
             let sigma = sigma_i as f32 / 10.0;
             let ksize = kernel_size(sigma);
@@ -247,19 +272,35 @@ mod tests {
     }
 
     #[test]
-    fn detect() {
-        let imgs = [
-            "testdata/edge-detection/simple.png",
-            "testdata/edge-detection/fuzzy.png",
-        ];
-        for p in imgs.iter() {
-            let image = image::open(p).unwrap();
-            let edges = detect_edges(&image.to_luma(), 1.0);
-            edges_to_image(&edges).save(format!("{}.0-edges.png", p.rsplitn(1, '.').next().unwrap())).unwrap();
-            let edges = minmax_suppression(&edges);
-            edges_to_image(&edges).save(format!("{}.1-minmax.png", p.rsplitn(1, '.').next().unwrap())).unwrap();
-            let edges = hysteresis(&edges, 0.4, 0.05);
-            edges_to_image(&edges).save(format!("{}.2-hysteresis.png", p.rsplitn(1, '.').next().unwrap())).unwrap();
+    fn detect_vertical_line_simple() {
+        // A vertical line of 1px wide should exist in the middle of the image.
+        let detection = canny_output_stages("testdata/line-simple.png");
+        // Find the line.
+        let mut line_x = None;
+        for x in 0..detection.width() {
+            if detection.edges[x][detection.height() / 2].magnitude > 0.8 {
+                if line_x.is_some() {
+                    panic!("the line is thicker than 1px");
+                }
+                line_x = Some(x)
+            }
+        }
+        let line_x = line_x.expect("no line detected");
+        // The line should be at about the middle of the image.
+        let middle = detection.width() / 2;
+        assert!(middle - 1 <= line_x && line_x <= middle);
+        // The line should be continuous.
+        for y in 0..detection.height() {
+            assert!(detection.edges[line_x][y].magnitude == 1.0);
+        }
+        // The line should be the only thing detected.
+        for x in 0..detection.width() {
+            if x == line_x {
+                continue;
+            }
+            for y in 0..detection.height() {
+                assert!(detection.edges[x][y].magnitude == 0.0);
+            }
         }
     }
 }
