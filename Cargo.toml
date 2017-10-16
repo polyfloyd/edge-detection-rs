@@ -1,6 +1,6 @@
 [package]
 name = "edge-detection"
-version = "0.0.2"
+version = "0.0.3"
 authors = ["polyfloyd <floyd@polyfloyd.net>"]
 license = "MIT"
 repository = "https://github.com/polyfloyd/edge-detection-rs"
