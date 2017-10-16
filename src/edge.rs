@@ -146,8 +146,11 @@ fn minmax_suppression(edges: &Vec<Vec<Edge>>) -> Vec<Vec<Edge>> {
                         1.0 <= m && m <= SQRT_2
                     });
 
+                    // Truncating the edge magnitudes helps mitigate rounding errors for thick edges.
+                    let truncate = |f: f32| (f * 1e5).round() * 1e-6;
+
                     let mut seek_pos = (x as f32, y as f32);
-                    let mut seek_magnitude = edge.magnitude;
+                    let mut seek_magnitude = truncate(edge.magnitude);
                     let mut distance = 0;
                     loop {
                         seek_pos.0 += box_vec.0;
@@ -178,10 +181,11 @@ fn minmax_suppression(edges: &Vec<Vec<Edge>>) -> Vec<Vec<Edge>> {
                         assert!(n >= 0.0);
 
                         if let (Some(nb_a), Some(nb_b)) = (nb_a, nb_b) {
-                            let interpolated_magnitude = nb_a.magnitude * (1.0 - n) + nb_b.magnitude * n;
-                            if seek_magnitude > edge.magnitude && interpolated_magnitude < seek_magnitude {
+                            let tr_edge_mag = truncate(edge.magnitude);
+                            let interpolated_magnitude = truncate(nb_a.magnitude * (1.0 - n) + nb_b.magnitude * n);
+                            if seek_magnitude > tr_edge_mag && interpolated_magnitude < seek_magnitude {
                                 break;
-                            } else if interpolated_magnitude < edge.magnitude {
+                            } else if interpolated_magnitude < tr_edge_mag {
                                 break;
                             } else {
                                 seek_magnitude = interpolated_magnitude;
