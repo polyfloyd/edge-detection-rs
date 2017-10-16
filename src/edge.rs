@@ -20,9 +20,9 @@ impl Detection {
 
 #[derive(Copy, Clone, Debug)]
 pub struct Edge {
-    vec_x: f32,
-    vec_y: f32,
-    magnitude: f32,
+    pub vec_x: f32,
+    pub vec_y: f32,
+    pub magnitude: f32,
     theta: f32,
 }
 
