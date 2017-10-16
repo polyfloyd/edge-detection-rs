@@ -9,16 +9,16 @@ pub struct Detection {
 }
 
 impl Detection {
-    fn width(&self) -> usize {
+    pub fn width(&self) -> usize {
         self.edges.len()
     }
 
-    fn height(&self) -> usize {
+    pub fn height(&self) -> usize {
         self.edges.first().unwrap().len()
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct Edge {
     vec_x: f32,
     vec_y: f32,
@@ -28,25 +28,27 @@ pub struct Edge {
 
 impl Edge {
     fn new(vec_x: f32, vec_y: f32) -> Edge {
-        let vec_x = if vec_x > 1.0 {
+        let vec_x = FRAC_1_SQRT_2 * if vec_x > 1.0 {
             1.0
         } else if vec_x < -1.0 {
             -1.0
         } else {
             vec_x
         };
-        let vec_y = if vec_y > 1.0 {
+        let vec_y = FRAC_1_SQRT_2 * if vec_y > 1.0 {
             1.0
         } else if vec_y < -1.0 {
             -1.0
         } else {
             vec_y
         };
+        let magnitude = (vec_x.powi(2) + vec_y.powi(2)).sqrt();
+        assert!(0.0 <= magnitude && magnitude <= 1.0);
         Edge {
-            vec_x,
-            vec_y,
-            magnitude: (vec_x.powi(2) + vec_y.powi(2)).sqrt(),
-            theta: f32::atan2(vec_x, vec_y),
+            vec_x: vec_x / magnitude,
+            vec_y: vec_y / magnitude,
+            magnitude,
+            theta: vec_y.atan2(vec_x),
         }
     }
 }
@@ -74,18 +76,19 @@ fn filter_kernel(sigma: f32) -> Vec<Vec<(f32, f32)>> {
 
 fn neighbour_pos_delta(theta: f32) -> (i32, i32) {
     let neighbours = [
-        (0, -1),  // center top
-        (1, -1),  // top right
         (1, 0),   // middle right
         (1, 1),   // bottom right
         (0, 1),   // center bottom
         (-1, 1),  // bottom left
         (-1, 0),  // middle left
         (-1, -1), // top left
+        (0, -1),  // center top
+        (1, -1),  // top right
     ];
-    let ang = ((theta + 2.0 * PI) % (2.0 * PI) / (2.0 * PI)) * 8.0;
-    assert!(ang >= 0.0 && ang <= 8.0);
-    neighbours[ang.floor() as usize]
+    let n = ((theta + PI * 2.0) % (2.0 * PI)) / (2.0 * PI);
+    let i = (n * 8.0 + 0.001).floor().min(7.0);
+    assert!(0.0 <= i && i < 8.0);
+    neighbours[i as usize]
 }
 
 /// Computes the edges in an image using the Canny Method.
@@ -118,54 +121,92 @@ fn detect_edges<T: Into<image::GrayImage>>(image: T, sigma: f32) -> Vec<Vec<Edge
     edges
 }
 
-/// Narrows the width of detected edges down to a single pixel
+/// Narrows the width of detected edges down to a single pixel.
 fn minmax_suppression(edges: &Vec<Vec<Edge>>) -> Vec<Vec<Edge>> {
-    let (width, height) = (edges.len(), edges.first().unwrap().len());
+    let (width, height) = (edges.len(), edges[0].len());
     let mut edges_out: Vec<Vec<Edge>> = vec![vec![Edge::new(0.0, 0.0); height]; width];
     for x in 0..width {
         for y in 0..height {
             let edge = edges[x][y];
-            let magnitude_exceeded = [0.0f32, 1.0].into_iter().fold(false, |magnitude_exceeded, invert| {
-                if magnitude_exceeded {
-                    return magnitude_exceeded;
-                }
-                // Determine the neighbours we should interpolate from.
-                let nb_a = neighbour_pos_delta(edge.theta + PI * invert + PI);
-                let nb_b = neighbour_pos_delta(edge.theta + PI * invert);
+            if edge.magnitude < 0.0001 {
+                // Skip distance computation for non-edges.
+                continue;
+            }
 
-                // Now get the magnitudes of the neighbours.
-                let nb_a_x = x as i32 + nb_a.0;
-                let nb_a_y = y as i32 + nb_a.1;
-                let nb_a_magnitude = if nb_a_y < 0 || nb_a_y >= height as i32 || nb_a_x < 0 || nb_a_x >= width as i32 {
-                    0.0
-                } else {
-                    edges[nb_a_x as usize][nb_a_y as usize].magnitude
-                };
-                let nb_b_x = x as i32 + nb_b.0;
-                let nb_b_y = y as i32 + nb_b.1;
-                let nb_b_magnitude = if nb_b_y < 0 || nb_b_y >= height as i32 || nb_b_x < 0 || nb_b_x >= width as i32 {
-                    0.0
-                } else {
-                    edges[nb_b_x as usize][nb_b_y as usize].magnitude
-                };
+            let distances: Vec<i32> = [1.0, -1.0].into_iter()
+                .map(|side| {
+                    // A vector confined to a box instead of a radius.
+                    // The magnitude ranges from 1 to sqrt(2).
+                    let box_vec = (
+                        (1.0 / edge.vec_x * side).min(1.0).max(-1.0),
+                        (1.0 / edge.vec_y * side).min(1.0).max(-1.0),
+                    );
+                    assert!({
+                        let m = (box_vec.0.powi(2) + box_vec.1.powi(2)).sqrt();
+                        1.0 <= m && m <= SQRT_2
+                    });
 
-                // Interpolate between the two neighbours.
-                let theta_q = edge.theta + FRAC_PI_4; // Theta aligned with the corners.
-                let n = if theta_q < FRAC_PI_2 { // Right
-                    (1.0 - ((edge.vec_y / edge.magnitude + 1.0) % 1.0)) * SQRT_2
-                } else if theta_q < PI { // Bottom
-                    (1.0 - ((edge.vec_x / edge.magnitude + 1.0) % 1.0)) * SQRT_2
-                } else if theta_q < PI + FRAC_PI_2 { // Left.
-                    ((edge.vec_y / edge.magnitude + 1.0) % 1.0) * SQRT_2
-                } else { // Top
-                    ((edge.vec_x / edge.magnitude + 1.0) % 1.0) * SQRT_2
-                };
-                let nb_mag = nb_a_magnitude * n + nb_b_magnitude * (1.0 - n);
-                magnitude_exceeded || edge.magnitude < nb_mag
-                // TODO: handle equal magnitudes for neighbours
-            });
-            if !magnitude_exceeded {
-                edges_out[x][y] = edge
+                    let mut seek_pos = (x as f32, y as f32);
+                    let mut seek_magnitude = edge.magnitude;
+                    let mut distance = 0;
+                    loop {
+                        seek_pos.0 += box_vec.0;
+                        seek_pos.1 += box_vec.1;
+                        let (nb_a, nb_b, n) = if (seek_pos.0 + 0.5).fract() < (seek_pos.1 + 0.5).fract() {
+                            // X is closest to a point.
+                            let x = (seek_pos.0.round() as usize).min(width - 1);
+                            let y1 = seek_pos.1.floor().max(0.0) as usize;
+                            let y2 = (seek_pos.1.ceil() as usize).min(height - 1);
+                            let n = seek_pos.1.fract();
+                            (
+                                edges.get(x).and_then(|col| col.get(y1)),
+                                edges.get(x).and_then(|col| col.get(y2)),
+                                n,
+                            )
+                        } else {
+                            // Y is closest to a point.
+                            let y = (seek_pos.1.round() as usize).min(height - 1);
+                            let x1 = seek_pos.0.floor().max(0.0) as usize;
+                            let x2 = (seek_pos.0.ceil() as usize).min(width - 1);
+                            let n = seek_pos.0.fract();
+                            (
+                                edges.get(x1).and_then(|col| col.get(y)),
+                                edges.get(x2).and_then(|col| col.get(y)),
+                                n,
+                            )
+                        };
+                        assert!(n >= 0.0);
+
+                        if let (Some(nb_a), Some(nb_b)) = (nb_a, nb_b) {
+                            let interpolated_magnitude = nb_a.magnitude * (1.0 - n) + nb_b.magnitude * n;
+                            if seek_magnitude > edge.magnitude && interpolated_magnitude < seek_magnitude {
+                                break;
+                            } else if interpolated_magnitude < edge.magnitude {
+                                break;
+                            } else {
+                                seek_magnitude = interpolated_magnitude;
+                            }
+                        } else {
+                            break;
+                        }
+                        distance += 1;
+                    }
+                    distance
+                })
+                .collect();
+
+            // Equal distances denote the middle of the edge.
+            // A deviation of 1 is allowed for edges over two equal pixels, in which case, the
+            // outer edge (near the dark side) is preferred.
+            let is_apex =
+                // The distances are equal, the edge's width is odd, making the apex lie on a
+                // single pixel.
+                distances[0] == distances[1]
+                // There is a difference of 1, the edge's width is even, spreading the apex over
+                // two pixels. This is a special case to handle edges that run along either the X- or X-axis.
+                || (distances[0] - distances[1] == 1) && ((1.0 - edge.vec_x.abs()).abs() < 0.001 || (1.0 - edge.vec_y.abs()).abs() < 0.001);
+            if is_apex {
+                edges_out[x][y] = edge;
             }
         }
     }
@@ -185,13 +226,13 @@ fn hysteresis(edges: &Vec<Vec<Edge>>, strong_threshold: f32, weak_threshold: f32
                 // Start following in both directions.
                 let mut stack = vec![(x, y)];
                 while let Some(top) = stack.pop() {
+                    edges_out[top.0][top.1] = edges[top.0][top.1];
                     edges_out[top.0][top.1].magnitude = 1.0;
 
                     for invert in [0.0, PI].into_iter() {
                         let (nb_pos, nb_magnitude) = [-FRAC_PI_4, 0.0, FRAC_PI_4].into_iter()
                             .map(|bearing| {
-                                // Add PI/2 to theta so it aligns with the edge.
-                                neighbour_pos_delta(edge.theta + FRAC_PI_2 + invert + bearing)
+                                neighbour_pos_delta(edge.theta + invert + bearing)
                             })
                             .filter_map(|(nb_dx, nb_dy)| {
                                 let nb_x = x as i32 + nb_dx;
@@ -222,32 +263,92 @@ fn hysteresis(edges: &Vec<Vec<Edge>>, strong_threshold: f32, weak_threshold: f32
     edges_out
 }
 
-fn edges_to_image(edges: &Vec<Vec<Edge>>) -> image::GrayImage {
-    let (width, height) = (edges.len(), edges.first().unwrap().len());
-    let mut image = image::GrayImage::from_pixel(width as u32, height as u32, image::Luma{ data: [0] });
-    for x in 0..width {
-        for y in 0..height {
-            let edge = edges[x][y];
-            *image.get_pixel_mut(x as u32, y as u32) = image::Luma{ data: [(edge.magnitude * FRAC_1_SQRT_2 * 255.0).round() as u8]};
-        }
-    }
-    image
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn canny_output_stages<T: AsRef<str>>(path: T) -> Detection {
+    fn edge_vectors_to_image(edges: &Vec<Vec<Edge>>) -> image::RgbImage {
+        let (width, height) = (edges.len(), edges.first().unwrap().len());
+        let mut image = image::RgbImage::from_pixel(width as u32, height as u32, image::Rgb{ data: [0, 0, 0] });
+        for x in 0..width {
+            for y in 0..height {
+                let edge = edges[x][y];
+                let pix = image.get_pixel_mut(x as u32, y as u32);
+                match (edge.theta + (PI * 2.0 + FRAC_PI_4)) % (PI * 2.0) {
+                    t if t < FRAC_PI_2 => { // Right side
+                        pix.data[0] = (edge.magnitude * 255.0) as u8;
+                    },
+                    t if t < PI => { // Bottom side
+                        pix.data[1] = (edge.magnitude * 255.0) as u8;
+                    },
+                    t if t < PI + FRAC_PI_2 => { // Left side
+                        pix.data[2] = (edge.magnitude * 255.0) as u8;
+                    },
+                    t if t < PI * 2.0 => { // Top side
+                        pix.data[0] = (edge.magnitude * 255.0) as u8;
+                        pix.data[1] = (edge.magnitude * 255.0) as u8;
+                    },
+                    _ => unreachable!(),
+                };
+            }
+        }
+        image
+    }
+
+    fn edges_to_image(edges: &Vec<Vec<Edge>>) -> image::GrayImage {
+        let (width, height) = (edges.len(), edges.first().unwrap().len());
+        let mut image = image::GrayImage::from_pixel(width as u32, height as u32, image::Luma{ data: [0] });
+        for x in 0..width {
+            for y in 0..height {
+                let edge = edges[x][y];
+                *image.get_pixel_mut(x as u32, y as u32) = image::Luma{ data: [(edge.magnitude * 255.0).round() as u8]};
+            }
+        }
+        image
+    }
+
+    fn canny_output_stages<T: AsRef<str>>(path: T, sigma: f32, strong_threshold: f32, weak_threshold: f32) -> Detection {
         let path = path.as_ref();
         let image = image::open(path).unwrap();
-        let edges = detect_edges(image.to_luma(), 1.0);
-        edges_to_image(&edges).save(format!("{}.0-edges.png", path)).unwrap();
+        let edges = detect_edges(image.to_luma(), sigma);
+        edge_vectors_to_image(&edges).save(format!("{}.0-vectors.png", path)).unwrap();
+        edges_to_image(&edges).save(format!("{}.1-edges.png", path)).unwrap();
         let edges = minmax_suppression(&edges);
-        edges_to_image(&edges).save(format!("{}.1-minmax.png", path)).unwrap();
-        let edges = hysteresis(&edges, 0.4, 0.05);
-        edges_to_image(&edges).save(format!("{}.2-hysteresis.png", path)).unwrap();
+        edges_to_image(&edges).save(format!("{}.2-minmax.png", path)).unwrap();
+        let edges = hysteresis(&edges, strong_threshold, weak_threshold);
+        edges_to_image(&edges).save(format!("{}.3-hysteresis.png", path)).unwrap();
         Detection { edges }
+    }
+
+    #[test]
+    fn neighbour_pos_delta_from_theta() {
+        let neighbours = [
+            (1, 0),
+            (1, 1),
+            (0, 1),
+            (-1, 1),
+            (-1, 0),
+            (-1, -1),
+            (0, -1),
+            (1, -1),
+        ];
+        for nb in neighbours.iter() {
+            let d = neighbour_pos_delta(f32::atan2(nb.1 as f32, nb.0 as f32));
+            assert_eq!(*nb, d);
+        }
+    }
+
+    #[test]
+    fn edge_new() {
+        let e = Edge::new(1.0, 0.0);
+        assert!(e.vec_x == 1.0);
+        assert!(e.vec_y == 0.0);
+        assert!(e.theta == 0.0);
+
+        let e = Edge::new(1.0, 1.0);
+        assert!(e.vec_x <= FRAC_2_SQRT_PI + 0.0001);
+        assert!(e.vec_y <= FRAC_2_SQRT_PI + 0.0001);
+        assert!(e.magnitude <= 1.0 + 0.0001);
     }
 
     #[test]
@@ -272,14 +373,12 @@ mod tests {
         }
     }
 
-    #[test]
-    fn detect_vertical_line_simple() {
-        // A vertical line of 1px wide should exist in the middle of the image.
-        let detection = canny_output_stages("testdata/line-simple.png");
+    /// Tests whether a vertical line of 1px wide exists in the middle of the image.
+    fn detect_vertical_line(detection: Detection) {
         // Find the line.
         let mut line_x = None;
         for x in 0..detection.width() {
-            if detection.edges[x][detection.height() / 2].magnitude > 0.8 {
+            if detection.edges[x][detection.height() / 2].magnitude > 0.5 {
                 if line_x.is_some() {
                     panic!("the line is thicker than 1px");
                 }
@@ -292,7 +391,10 @@ mod tests {
         assert!(middle - 1 <= line_x && line_x <= middle);
         // The line should be continuous.
         for y in 0..detection.height() {
-            assert!(detection.edges[line_x][y].magnitude == 1.0);
+            let edge = detection.edges[line_x][y];
+            assert!(edge.magnitude == 1.0);
+            // The direction of the line's surface normal should follow the X-axis.
+            assert!(-0.05 < edge.theta && edge.theta <= 0.05);
         }
         // The line should be the only thing detected.
         for x in 0..detection.width() {
@@ -303,5 +405,17 @@ mod tests {
                 assert!(detection.edges[x][y].magnitude == 0.0);
             }
         }
+    }
+
+    #[test]
+    fn detect_vertical_line_simple() {
+        let d = canny_output_stages("testdata/line-simple.png", 1.2, 0.4, 0.05);
+        detect_vertical_line(d);
+    }
+
+    #[test]
+    fn detect_vertical_line_fuzzy() {
+        let d = canny_output_stages("testdata/line-fuzzy.png", 2.0, 0.4, 0.05);
+        detect_vertical_line(d);
     }
 }
