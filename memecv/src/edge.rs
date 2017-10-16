@@ -58,16 +58,18 @@ pub fn canny<T: Into<image::GrayImage>>(image: T, sigma: f32, strong_threshold: 
     Detection { edges }
 }
 
-
-fn gaussian_derivative_2d(x: f32, y: f32, sigma: f32) -> (f32, f32) {
-    let gx = x * E.powf(-(x.powi(2) + y.powi(2)) / (2. * sigma.powi(2))) / (2.0 * sigma.powi(2));
-    let gy = y * E.powf(-(x.powi(2) + y.powi(2)) / (2. * sigma.powi(2))) / (2.0 * sigma.powi(2));
-    (gx, gy)
-}
-
-/// Calculates the width and height of the kernel produced by `gaussian_derivative_2d`.
-fn kernel_size(sigma: f32) -> i32 {
-    (sigma * 10.0).round() as i32
+/// Calculates a 2nd order 2D gaussian derivative with size sigma.
+fn filter_kernel(sigma: f32) -> Vec<Vec<(f32, f32)>> {
+    let size = (sigma * 10.0).round() as usize;
+    (0..size).map(|x| {
+        (0..size).map(|y| {
+            let (xf, yf) = (x as f32 - size as f32 / 2.0, y as f32 - size as f32 / 2.0);
+            let g = E.powf(-(xf.powi(2) + yf.powi(2)) / (2. * sigma.powi(2))) / (2.0 * sigma.powi(2));
+            (xf * g, yf * g)
+        })
+        .collect()
+    })
+    .collect()
 }
 
 fn neighbour_pos_delta(theta: f32) -> (i32, i32) {
@@ -93,23 +95,21 @@ fn detect_edges<T: Into<image::GrayImage>>(image: T, sigma: f32) -> Vec<Vec<Edge
     let image = image.into();
     let (width, height) = (image.width() as usize, image.height() as usize);
     let mut edges: Vec<Vec<Edge>> = vec![vec![Edge::new(0.0, 0.0); height]; width];
-    let kernel_size = kernel_size(sigma);
-    let edge_borders = 0.5;
+    let kernel = filter_kernel(sigma);
     for ix in 0..width as i32 {
         for iy in 0..height as i32 {
             let mut sum_x = 0.0;
             let mut sum_y = 0.0;
-            for kx in -kernel_size / 2..kernel_size / 2 {
-                for ky in -kernel_size / 2..kernel_size / 2 {
+            let ks = kernel.len() as i32;
+            for kx in 0..ks {
+                for ky in 0..ks {
                     // Clamp x and y within the image bounds so no non-existing borders are be
                     // detected based on some background color outside image bounds.
-                    let x = cmp::min(cmp::max(ix + kx, 0), width as i32 - 1);
-                    let y = cmp::min(cmp::max(iy + ky, 0), height as i32 - 1);
+                    let x = cmp::min(cmp::max((ix + kx) - ks / 2, 0), width as i32 - 1);
+                    let y = cmp::min(cmp::max((iy + ky) - ks / 2, 0), height as i32 - 1);
                     let pix = image.get_pixel(x as u32, y as u32).data[0] as f32 / 255.0;
-                    // TODO: cache kernel
-                    let (gx, gy) = gaussian_derivative_2d(kx as f32, ky as f32, sigma);
-                    sum_x += pix * gx;
-                    sum_y += pix * gy;
+                    sum_x += pix * kernel[kx as usize][ky as usize].0;
+                    sum_y += pix * kernel[kx as usize][ky as usize].1;
                 }
             }
             edges[ix as usize][iy as usize] = Edge::new(sum_x, sum_y);
@@ -255,12 +255,13 @@ mod tests {
         // The integral for the filter kernel should approximate 0.
         for sigma_i in 1..200 {
             let sigma = sigma_i as f32 / 10.0;
-            let ksize = kernel_size(sigma);
+            let kernel = filter_kernel(sigma);
+            let ksize = kernel.len();
+            assert!(kernel.len() == kernel[0].len());
             let mut sum_x = 0.0;
             let mut sum_y = 0.0;
-            for x in -ksize / 2..ksize / 2 {
-                for y in -ksize / 2..ksize / 2 {
-                    let (gx, gy) = gaussian_derivative_2d(x as f32, y as f32, sigma);
+            for col in kernel {
+                for (gx, gy) in col {
                     sum_x += gx;
                     sum_y += gy;
                 }
