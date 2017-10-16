@@ -1,6 +1,6 @@
 [package]
 name = "edge-detection"
-version = "0.0.1"
+version = "0.0.2"
 authors = ["polyfloyd <floyd@polyfloyd.net>"]
 license = "MIT"
 description = "The canny edge detection algorithm"
