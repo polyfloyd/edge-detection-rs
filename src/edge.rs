@@ -5,7 +5,7 @@ use image;
 
 #[derive(Clone)]
 pub struct Detection {
-    edges: Vec<Vec<Edge>>,
+    pub edges: Vec<Vec<Edge>>,
 }
 
 impl Detection {
