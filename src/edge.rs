@@ -54,7 +54,7 @@ impl Edge {
 }
 
 pub fn canny<T: Into<image::GrayImage>>(image: T, sigma: f32, strong_threshold: f32, weak_threshold: f32) -> Detection {
-    let edges = detect_edges(image, sigma);
+    let edges = detect_edges(&image.into(), sigma);
     let edges = minmax_suppression(&edges);
     let edges = hysteresis(&edges, strong_threshold, weak_threshold);
     Detection { edges }
@@ -94,8 +94,7 @@ fn neighbour_pos_delta(theta: f32) -> (i32, i32) {
 /// Computes the edges in an image using the Canny Method.
 ///
 /// `sigma` determines the radius of the Gaussian kernel.
-fn detect_edges<T: Into<image::GrayImage>>(image: T, sigma: f32) -> Vec<Vec<Edge>> {
-    let image = image.into();
+fn detect_edges(image: &image::GrayImage, sigma: f32) -> Vec<Vec<Edge>> {
     let (width, height) = (image.width() as usize, image.height() as usize);
     let mut edges: Vec<Vec<Edge>> = vec![vec![Edge::new(0.0, 0.0); height]; width];
     let kernel = filter_kernel(sigma);
@@ -314,7 +313,7 @@ mod tests {
     fn canny_output_stages<T: AsRef<str>>(path: T, sigma: f32, strong_threshold: f32, weak_threshold: f32) -> Detection {
         let path = path.as_ref();
         let image = image::open(path).unwrap();
-        let edges = detect_edges(image.to_luma(), sigma);
+        let edges = detect_edges(&image.to_luma(), sigma);
         edge_vectors_to_image(&edges).save(format!("{}.0-vectors.png", path)).unwrap();
         edges_to_image(&edges).save(format!("{}.1-edges.png", path)).unwrap();
         let edges = minmax_suppression(&edges);
@@ -421,5 +420,57 @@ mod tests {
     fn detect_vertical_line_fuzzy() {
         let d = canny_output_stages("testdata/line-fuzzy.png", 2.0, 0.4, 0.05);
         detect_vertical_line(d);
+    }
+}
+
+#[cfg(all(test, feature = "unstable"))]
+mod benchmarks {
+    extern crate test;
+    use super::*;
+
+    static IMG_PATH: &str = "testdata/circle.png";
+
+    #[bench]
+    fn bench_filter_kernel_low_sigma(b: &mut test::Bencher) {
+        b.iter(|| filter_kernel(1.2));
+    }
+
+    #[bench]
+    fn bench_filter_kernel_high_sigma(b: &mut test::Bencher) {
+        b.iter(|| filter_kernel(5.0));
+    }
+
+    #[bench]
+    fn bench_detect_edges_low_sigma(b: &mut test::Bencher) {
+        let image = image::open(IMG_PATH).unwrap().to_luma();
+        b.iter(|| detect_edges(&image, 1.2));
+    }
+
+    #[bench]
+    fn bench_detect_edges_high_sigma(b: &mut test::Bencher) {
+        let image = image::open(IMG_PATH).unwrap().to_luma();
+        b.iter(|| detect_edges(&image, 5.0));
+    }
+
+    #[bench]
+    fn bench_minmax_suppression_low_sigma(b: &mut test::Bencher) {
+        let image = image::open(IMG_PATH).unwrap().to_luma();
+        let edges = detect_edges(&image, 1.2);
+        b.iter(|| minmax_suppression(&edges));
+    }
+
+    #[bench]
+    fn bench_minmax_suppression_high_sigma(b: &mut test::Bencher) {
+        let image = image::open(IMG_PATH).unwrap().to_luma();
+        let edges = detect_edges(&image, 5.0);
+        b.iter(|| minmax_suppression(&edges));
+    }
+
+    #[bench]
+    fn bench_hysteresis(b: &mut test::Bencher) {
+        let image = image::open(IMG_PATH).unwrap().to_luma();
+        let edges = detect_edges(&image, 1.2);
+        let edges = minmax_suppression(&edges);
+        b.iter(|| hysteresis(&edges, 0.4, 0.1));
     }
 }

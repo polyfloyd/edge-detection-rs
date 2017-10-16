@@ -14,5 +14,8 @@ include = [
     "Cargo.toml",
 ]
 
+[features]
+unstable = []
+
 [dependencies]
 image = "~0.17.0"
