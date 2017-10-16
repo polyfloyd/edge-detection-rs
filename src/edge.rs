@@ -368,8 +368,8 @@ mod tests {
                 }
             }
             println!("sum = ({}, {}), sigma = {}, kernel_size = {}", sum_x, sum_y, sigma, ksize);
-            assert!(-0.05 < sum_x && sum_x <= 0.05);
-            assert!(-0.05 < sum_y && sum_y <= 0.05);
+            assert!(-0.0001 < sum_x && sum_x <= 0.0001);
+            assert!(-0.0001 < sum_y && sum_y <= 0.0001);
         }
     }
 
