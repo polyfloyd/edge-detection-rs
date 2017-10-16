@@ -1,6 +1,8 @@
 *.swp
 *.swo
 
+/target
+
 *.0-vectors.png
 *.1-edges.png
 *.2-minmax.png
