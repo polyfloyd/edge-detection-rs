@@ -1,7 +1,14 @@
 [package]
-name = "memecv"
-version = "0.1.0"
+name = "edge-detection"
+version = "0.0.1"
 authors = ["polyfloyd <floyd@polyfloyd.net>"]
+license = "MIT"
+description = "The canny edge detection algorithm"
+
+include = [
+    "src/**/*.rs",
+    "Cargo.toml",
+]
 
 [dependencies]
-image = "*"
+image = "~0.17.0"
