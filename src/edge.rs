@@ -24,7 +24,6 @@ pub struct Edge {
     pub vec_x: f32,
     pub vec_y: f32,
     pub magnitude: f32,
-    theta: f32,
 }
 
 impl Edge {
@@ -49,8 +48,11 @@ impl Edge {
             vec_x: vec_x / magnitude,
             vec_y: vec_y / magnitude,
             magnitude,
-            theta: vec_y.atan2(vec_x),
         }
+    }
+
+    fn theta(&self) -> f32 {
+        self.vec_y.atan2(self.vec_x)
     }
 }
 
@@ -240,7 +242,7 @@ fn hysteresis(edges: &Vec<Vec<Edge>>, strong_threshold: f32, weak_threshold: f32
                     for invert in [0.0, PI].into_iter() {
                         let (nb_pos, nb_magnitude) = [-FRAC_PI_4, 0.0, FRAC_PI_4].into_iter()
                             .map(|bearing| {
-                                neighbour_pos_delta(edge.theta + invert + bearing)
+                                neighbour_pos_delta(edge.theta() + invert + bearing)
                             })
                             .filter_map(|(nb_dx, nb_dy)| {
                                 let nb_x = x as i32 + nb_dx;
@@ -282,7 +284,7 @@ mod tests {
             for y in 0..height {
                 let edge = edges[x][y];
                 let pix = image.get_pixel_mut(x as u32, y as u32);
-                match (edge.theta + (PI * 2.0 + FRAC_PI_4)) % (PI * 2.0) {
+                match (edge.theta() + (PI * 2.0 + FRAC_PI_4)) % (PI * 2.0) {
                     t if t < FRAC_PI_2 => { // Right side
                         pix.data[0] = (edge.magnitude * 255.0) as u8;
                     },
@@ -351,7 +353,6 @@ mod tests {
         let e = Edge::new(1.0, 0.0);
         assert!(e.vec_x == 1.0);
         assert!(e.vec_y == 0.0);
-        assert!(e.theta == 0.0);
 
         let e = Edge::new(1.0, 1.0);
         assert!(e.vec_x <= FRAC_2_SQRT_PI + 0.0001);
@@ -402,7 +403,7 @@ mod tests {
             let edge = detection.edges[line_x][y];
             assert!(edge.magnitude == 1.0);
             // The direction of the line's surface normal should follow the X-axis.
-            assert!(-0.05 < edge.theta && edge.theta <= 0.05);
+            assert!(-0.05 < edge.theta() && edge.theta() <= 0.05);
         }
         // The line should be the only thing detected.
         for x in 0..detection.width() {
