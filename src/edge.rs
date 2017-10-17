@@ -126,13 +126,12 @@ fn detect_edges(image: &image::GrayImage, sigma: f32) -> Vec<Vec<Edge>> {
 /// Narrows the width of detected edges down to a single pixel.
 fn minmax_suppression(edges: &Vec<Vec<Edge>>) -> Vec<Vec<Edge>> {
     let (width, height) = (edges.len(), edges[0].len());
-    let mut edges_out: Vec<Vec<Edge>> = vec![vec![Edge::new(0.0, 0.0); height]; width];
-    for x in 0..width {
-        for y in 0..height {
+    (0..width).into_par_iter().map(|x| {
+        (0..height).into_par_iter().map(|y| {
             let edge = edges[x][y];
             if edge.magnitude < 0.0001 {
                 // Skip distance computation for non-edges.
-                continue;
+                return Edge::new(0.0, 0.0);
             }
 
             let distances: Vec<i32> = [1.0, -1.0].into_iter()
@@ -212,11 +211,14 @@ fn minmax_suppression(edges: &Vec<Vec<Edge>>) -> Vec<Vec<Edge>> {
                 // two pixels. This is a special case to handle edges that run along either the X- or X-axis.
                 || (distances[0] - distances[1] == 1) && ((1.0 - edge.vec_x.abs()).abs() < 0.001 || (1.0 - edge.vec_y.abs()).abs() < 0.001);
             if is_apex {
-                edges_out[x][y] = edge;
+                edge
+            } else {
+                Edge::new(0.0, 0.0)
             }
-        }
-    }
-    edges_out
+        })
+        .collect()
+    })
+    .collect()
 }
 
 fn hysteresis(edges: &Vec<Vec<Edge>>, strong_threshold: f32, weak_threshold: f32) -> Vec<Vec<Edge>> {
