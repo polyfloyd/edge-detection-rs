@@ -19,3 +19,4 @@ unstable = []
 
 [dependencies]
 image = "~0.17.0"
+rayon = "~0.8.2"

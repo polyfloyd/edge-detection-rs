@@ -1,6 +1,7 @@
 use std::*;
 use std::f32::consts::*;
 use image;
+use rayon::prelude::*;
 
 
 #[derive(Clone)]
@@ -95,29 +96,31 @@ fn neighbour_pos_delta(theta: f32) -> (i32, i32) {
 ///
 /// `sigma` determines the radius of the Gaussian kernel.
 fn detect_edges(image: &image::GrayImage, sigma: f32) -> Vec<Vec<Edge>> {
-    let (width, height) = (image.width() as usize, image.height() as usize);
-    let mut edges: Vec<Vec<Edge>> = vec![vec![Edge::new(0.0, 0.0); height]; width];
+    let (width, height) = (image.width() as i32, image.height() as i32);
     let kernel = filter_kernel(sigma);
-    for ix in 0..width as i32 {
-        for iy in 0..height as i32 {
-            let mut sum_x = 0.0;
-            let mut sum_y = 0.0;
+    (0..width).into_par_iter().map(|ix| {
+        (0..height).into_par_iter().map(|iy| {
             let ks = kernel.len() as i32;
-            for kx in 0..ks {
-                for ky in 0..ks {
-                    // Clamp x and y within the image bounds so no non-existing borders are be
-                    // detected based on some background color outside image bounds.
-                    let x = cmp::min(cmp::max((ix + kx) - ks / 2, 0), width as i32 - 1);
-                    let y = cmp::min(cmp::max((iy + ky) - ks / 2, 0), height as i32 - 1);
-                    let pix = image.get_pixel(x as u32, y as u32).data[0] as f32 / 255.0;
-                    sum_x += pix * kernel[kx as usize][ky as usize].0;
-                    sum_y += pix * kernel[kx as usize][ky as usize].1;
-                }
-            }
-            edges[ix as usize][iy as usize] = Edge::new(sum_x, sum_y);
-        }
-    }
-    edges
+            let (sum_x, sum_y) = kernel.iter()
+                .zip(-ks / 2..ks / 2)
+                .flat_map(|(col, kx)| {
+                    col.iter()
+                        .zip(-ks / 2..ks / 2)
+                        .map(move |(k, ky)| {
+                            // Clamp x and y within the image bounds so no non-existing borders are be
+                            // detected based on some background color outside image bounds.
+                            let x = (ix + kx).min(width - 1).max(0);
+                            let y = (iy + ky).min(height - 1).max(0);
+                            let pix = image.get_pixel(x as u32, y as u32).data[0] as f32 / 255.0;
+                            (pix * k.0, pix * k.1)
+                        })
+                })
+                .fold((0.0, 0.0), |accum, pix| (accum.0 + pix.0, accum.1 + pix.1));
+            Edge::new(sum_x, sum_y)
+        })
+        .collect()
+    })
+    .collect()
 }
 
 /// Narrows the width of detected edges down to a single pixel.
