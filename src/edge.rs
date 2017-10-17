@@ -44,9 +44,14 @@ impl Edge {
         };
         let magnitude = (vec_x.powi(2) + vec_y.powi(2)).sqrt();
         assert!(0.0 <= magnitude && magnitude <= 1.0);
+        let frac_1_mag = if magnitude != 0.0 {
+            1.0 / magnitude
+        } else {
+            1.0
+        };
         Edge {
-            vec_x: vec_x / magnitude,
-            vec_y: vec_y / magnitude,
+            vec_x: vec_x * frac_1_mag,
+            vec_y: vec_y * frac_1_mag,
             magnitude,
         }
     }
@@ -351,13 +356,13 @@ mod tests {
     #[test]
     fn edge_new() {
         let e = Edge::new(1.0, 0.0);
-        assert!(e.vec_x == 1.0);
-        assert!(e.vec_y == 0.0);
+        assert!(1.0 - 1e-6 < e.vec_x && e.vec_x < 1.0 + 1e-6);
+        assert!(-1e-5 < e.vec_y && e.vec_y < 1e-6);
 
         let e = Edge::new(1.0, 1.0);
-        assert!(e.vec_x <= FRAC_2_SQRT_PI + 0.0001);
-        assert!(e.vec_y <= FRAC_2_SQRT_PI + 0.0001);
-        assert!(e.magnitude <= 1.0 + 0.0001);
+        assert!(FRAC_1_SQRT_2 - 1e-5 < e.vec_x && e.vec_x < FRAC_1_SQRT_2 + 1e-6);
+        assert!(FRAC_1_SQRT_2 - 1e-5 < e.vec_y && e.vec_y < FRAC_1_SQRT_2 + 1e-6);
+        assert!(1.0 - 1e-6 < e.magnitude && e.magnitude < 1.0 + 1e-6);
     }
 
     #[test]
