@@ -145,12 +145,19 @@ fn minmax_suppression(edges: &Vec<Vec<Edge>>) -> Vec<Vec<Edge>> {
                 .map(|side| {
                     // A vector confined to a box instead of a radius.
                     // The magnitude ranges from 1 to sqrt(2).
-                    let box_vec = (
-                        (1.0 / edge.vec_x * side).min(1.0).max(-1.0),
-                        (1.0 / edge.vec_y * side).min(1.0).max(-1.0),
-                    );
+                    let box_vec = {
+                        let r = (1.0 / edge.vec_x.abs())
+                            .min(1.0 / edge.vec_y.abs());
+                        (
+                            edge.vec_x * r * side,
+                            edge.vec_y * r * side,
+                        )
+                    };
+                    assert!((1.0 - box_vec.0.abs()).abs() <= 1e-6 || (1.0 - box_vec.1.abs()).abs() <= 1e-6);
+                    assert!(edge.vec_x.signum() * side == box_vec.0.signum());
+                    assert!(edge.vec_y.signum() * side == box_vec.1.signum());
                     assert!({
-                        let m = (box_vec.0.powi(2) + box_vec.1.powi(2)).sqrt();
+                        let m = f32::hypot(box_vec.0, box_vec.1);
                         1.0 <= m && m <= SQRT_2
                     });
 
@@ -163,44 +170,46 @@ fn minmax_suppression(edges: &Vec<Vec<Edge>>) -> Vec<Vec<Edge>> {
                     loop {
                         seek_pos.0 += box_vec.0;
                         seek_pos.1 += box_vec.1;
-                        let (nb_a, nb_b, n) = if (seek_pos.0 + 0.5).fract() < (seek_pos.1 + 0.5).fract() {
+                        let (nb_a, nb_b, n) = if seek_pos.0.abs().fract() < seek_pos.1.abs().fract() {
                             // X is closest to a point.
-                            let x = (seek_pos.0.round() as usize).min(width - 1);
-                            let y1 = seek_pos.1.floor().max(0.0) as usize;
-                            let y2 = (seek_pos.1.ceil() as usize).min(height - 1);
-                            let n = seek_pos.1.fract();
+                            let x = seek_pos.0.round() as usize;
+                            let y1 = (seek_pos.1.floor().max(0.0) as usize).min(height - 1);
+                            let y2 = (seek_pos.1.ceil() as usize).max(0).min(height - 1);
+                            let n = (seek_pos.1.fract() + 1.0).fract();
                             (
-                                edges.get(x).and_then(|col| col.get(y1)),
-                                edges.get(x).and_then(|col| col.get(y2)),
+                                edges.get(x).map(|col| col[y1]).map(|e| e.magnitude),
+                                edges.get(x).map(|col| col[y2]).map(|e| e.magnitude),
                                 n,
                             )
                         } else {
                             // Y is closest to a point.
-                            let y = (seek_pos.1.round() as usize).min(height - 1);
-                            let x1 = seek_pos.0.floor().max(0.0) as usize;
-                            let x2 = (seek_pos.0.ceil() as usize).min(width - 1);
-                            let n = seek_pos.0.fract();
+                            let y = seek_pos.1.round() as usize;
+                            let x1 = (seek_pos.0.floor().max(0.0) as usize).min(width - 1);
+                            let x2 = (seek_pos.0.ceil() as usize).max(0).min(width - 1);
+                            let n = (seek_pos.0.fract() + 1.0).fract();
                             (
-                                edges.get(x1).and_then(|col| col.get(y)),
-                                edges.get(x2).and_then(|col| col.get(y)),
+                                edges[x1].get(y).map(|e| e.magnitude),
+                                edges[x2].get(y).map(|e| e.magnitude),
                                 n,
                             )
                         };
                         assert!(n >= 0.0);
 
-                        if let (Some(nb_a), Some(nb_b)) = (nb_a, nb_b) {
-                            let tr_edge_mag = truncate(edge.magnitude);
-                            let interpolated_magnitude = truncate(nb_a.magnitude * (1.0 - n) + nb_b.magnitude * n);
-                            if seek_magnitude > tr_edge_mag && interpolated_magnitude < seek_magnitude {
-                                break;
-                            } else if interpolated_magnitude < tr_edge_mag {
-                                break;
-                            } else {
-                                seek_magnitude = interpolated_magnitude;
-                            }
-                        } else {
+                        let interpolated_magnitude = truncate(nb_a.unwrap_or(0.0) * (1.0 - n) + nb_b.unwrap_or(0.0) * n);
+                        let trunc_edge_magnitude = truncate(edge.magnitude);
+                        // Keep searching until either:
+                        let end =
+                            // The next edge has a lesser magnitude than the reference edge.
+                            interpolated_magnitude < trunc_edge_magnitude
+                            // The gradient increases, meaning we are going up against an (other) edge.
+                            || seek_magnitude > trunc_edge_magnitude && interpolated_magnitude < seek_magnitude
+                            // We've crossed the image border.
+                            || nb_a.is_none() || nb_b.is_none();
+                        if end {
                             break;
                         }
+
+                        seek_magnitude = interpolated_magnitude;
                         distance += 1;
                     }
                     distance
@@ -216,7 +225,7 @@ fn minmax_suppression(edges: &Vec<Vec<Edge>>) -> Vec<Vec<Edge>> {
                 distances[0] == distances[1]
                 // There is a difference of 1, the edge's width is even, spreading the apex over
                 // two pixels. This is a special case to handle edges that run along either the X- or X-axis.
-                || (distances[0] - distances[1] == 1) && ((1.0 - edge.vec_x.abs()).abs() < 0.001 || (1.0 - edge.vec_y.abs()).abs() < 0.001);
+                || (distances[0] - distances[1] == 1 && ((1.0 - edge.vec_x.abs()).abs() < 1e-5 || (1.0 - edge.vec_y.abs()).abs() < 1e-5));
             if is_apex {
                 edge
             } else {
