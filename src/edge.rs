@@ -94,9 +94,8 @@ fn neighbour_pos_delta(theta: f32) -> (i32, i32) {
         (1, -1),  // top right
     ];
     let n = ((theta + PI * 2.0) % (2.0 * PI)) / (2.0 * PI);
-    let i = (n * 8.0 + 0.001).floor().min(7.0);
-    assert!(0.0 <= i && i < 8.0);
-    neighbours[i as usize]
+    let i = (n * 8.0).round() as usize % 8;
+    neighbours[i]
 }
 
 /// Computes the edges in an image using the Canny Method.
@@ -238,48 +237,54 @@ fn minmax_suppression(edges: &Vec<Vec<Edge>>) -> Vec<Vec<Edge>> {
 }
 
 fn hysteresis(edges: &Vec<Vec<Edge>>, strong_threshold: f32, weak_threshold: f32) -> Vec<Vec<Edge>> {
-    assert!(0.0 <= strong_threshold && strong_threshold < 1.0);
-    assert!(0.0 <= weak_threshold && weak_threshold < 1.0);
+    assert!(0.0 < strong_threshold && strong_threshold < 1.0);
+    assert!(0.0 < weak_threshold && weak_threshold < 1.0);
     assert!(weak_threshold < strong_threshold);
+
     let (width, height) = (edges.len(), edges.first().unwrap().len());
     let mut edges_out: Vec<Vec<Edge>> = vec![vec![Edge::new(0.0, 0.0); height]; width];
     for x in 0..width {
         for y in 0..height {
-            let edge = edges[x][y];
-            if edge.magnitude >= strong_threshold && edges_out[x][y].magnitude != 1.0 {
-                // Start following in both directions.
-                let mut stack = vec![(x, y)];
-                while let Some(top) = stack.pop() {
-                    edges_out[top.0][top.1] = edges[top.0][top.1];
-                    edges_out[top.0][top.1].magnitude = 1.0;
+            if edges[x][y].magnitude < strong_threshold || edges_out[x][y].magnitude >= strong_threshold {
+                continue;
+            }
 
-                    for invert in [0.0, PI].into_iter() {
-                        let (nb_pos, nb_magnitude) = [-FRAC_PI_4, 0.0, FRAC_PI_4].into_iter()
-                            .map(|bearing| {
-                                neighbour_pos_delta(edge.theta() + invert + bearing)
-                            })
-                            .filter_map(|(nb_dx, nb_dy)| {
-                                let nb_x = x as i32 + nb_dx;
-                                let nb_y = y as i32 + nb_dy;
-                                if nb_x < 0 || nb_x >= width as i32 || nb_y < 0 || nb_y >= height as i32 {
-                                    return None;
-                                }
+            // Follow along the edge along both sides, preserving all edges which magnitude is at
+            // least weak_threshold.
+            for side in [0.0, PI].into_iter() {
+                let mut current_pos = (x, y);
+                loop {
+                    let edge = edges[current_pos.0][current_pos.1];
+                    edges_out[current_pos.0][current_pos.1] = Edge { magnitude: 1.0, .. edge };
+                    // Attempt to find the next line-segment of the edge in tree directions ahead.
+                    let (nb_pos, nb_magnitude) = [FRAC_PI_4, 0.0, -FRAC_PI_4].into_iter()
+                        .map(|bearing| {
+                            neighbour_pos_delta(edge.theta() + FRAC_PI_2 + side + bearing)
+                        })
+                        // Filter out hypothetical neighbours that are outside image bounds.
+                        .filter_map(|(nb_dx, nb_dy)| {
+                            let nb_x = current_pos.0 as i32 + nb_dx;
+                            let nb_y = current_pos.1 as i32 + nb_dy;
+                            if 0 <= nb_x && nb_x < width as i32 && 0 <= nb_y && nb_y < height as i32 {
                                 let nb = (nb_x as usize, nb_y as usize);
                                 Some((nb, edges[nb.0][nb.1].magnitude))
-                            })
-                            .fold(((0, 0), 0.0), |(max_pos, max_mag), (pos, mag)| {
-                                if mag > max_mag {
-                                    (pos, mag)
-                                } else {
-                                    (max_pos, max_mag)
-                                }
-                            });
-
-                        if nb_magnitude >= weak_threshold && edges_out[nb_pos.0][nb_pos.1].magnitude != 1.0 {
-                            stack.push(nb_pos);
-                        }
+                            } else {
+                                None
+                            }
+                        })
+                        // Select the neighbouring edge with the highest magnitude as the next
+                        // line-segment.
+                        .fold(((0, 0), 0.0), |(max_pos, max_mag), (pos, mag)| {
+                            if mag > max_mag {
+                                (pos, mag)
+                            } else {
+                                (max_pos, max_mag)
+                            }
+                        });
+                    if nb_magnitude < weak_threshold || edges_out[nb_pos.0][nb_pos.1].magnitude >= strong_threshold {
+                        break;
                     }
-
+                    current_pos = nb_pos;
                 }
             }
         }
@@ -397,7 +402,9 @@ mod tests {
     }
 
     /// Tests whether a vertical line of 1px wide exists in the middle of the image.
-    fn detect_vertical_line(detection: Detection) {
+    ///
+    /// Returns the location of the line on the X-axis.
+    fn detect_vertical_line(detection: &Detection) -> usize {
         // Find the line.
         let mut line_x = None;
         for x in 0..detection.width() {
@@ -416,8 +423,6 @@ mod tests {
         for y in 0..detection.height() {
             let edge = detection.edges[line_x][y];
             assert!(edge.magnitude == 1.0);
-            // The direction of the line's surface normal should follow the X-axis.
-            assert!(-0.05 < edge.theta() && edge.theta() <= 0.05);
         }
         // The line should be the only thing detected.
         for x in 0..detection.width() {
@@ -428,18 +433,34 @@ mod tests {
                 assert!(detection.edges[x][y].magnitude == 0.0);
             }
         }
+        line_x
     }
 
     #[test]
     fn detect_vertical_line_simple() {
         let d = canny_output_stages("testdata/line-simple.png", 1.2, 0.4, 0.05);
-        detect_vertical_line(d);
+        let x = detect_vertical_line(&d);
+        // The direction of the line's surface normal should follow the X-axis.
+        for y in 0..d.height() {
+            assert!(d.edges[x][y].theta().abs() < 1e-5);
+        }
     }
 
     #[test]
     fn detect_vertical_line_fuzzy() {
         let d = canny_output_stages("testdata/line-fuzzy.png", 2.0, 0.4, 0.05);
-        detect_vertical_line(d);
+        let x = detect_vertical_line(&d);
+        // The direction of the line's surface normal should follow the X-axis.
+        for y in 0..d.height() {
+            assert!(d.edges[x][y].theta().abs() < 0.01);
+        }
+    }
+
+    #[test]
+    fn detect_vertical_line_weakening() {
+        let d = canny_output_stages("testdata/line-weakening.png", 1.2, 0.7, 0.05);
+        detect_vertical_line(&d);
+        // The line vectors are not tested because they are distorted by the gradient.
     }
 }
 
