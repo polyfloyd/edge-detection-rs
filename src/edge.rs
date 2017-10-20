@@ -105,6 +105,7 @@ impl Edge {
 ///
 /// The variable `sigma` determines the size of the filter kernel which affects the precision and
 /// SNR of the computation:
+///
 /// * A small sigma (3.0<) creates a kernel which is able to discern fine details but is more prone
 ///   to noise.
 /// * Larger values result in detail being lost and are thus best used for detecting large
