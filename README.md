@@ -4,8 +4,8 @@ Edge Detection
 [![](https://img.shields.io/crates/v/edge-detection.svg)](https://crates.io/crates/edge-detection)
 [![Documentation](https://docs.rs/edge-detection/badge.svg)](https://docs.rs/edge-detection/)
 
-![Circle](media/demo-circle.png)
-
 This crate implements the Canny edge detection algorithm.
 
-It's still a work in progress and should not be considered ready for production just yet.
+![Circle](media/demo-circle.png)
+
+![Peppers](media/demo-peppers.png)
