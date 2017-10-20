@@ -4,26 +4,47 @@ use image;
 use rayon::prelude::*;
 
 
+/// The result of a computation.
 #[derive(Clone)]
 pub struct Detection {
-    pub edges: Vec<Vec<Edge>>,
+    edges: Vec<Vec<Edge>>,
 }
 
 impl Detection {
+    /// Returns the width of the computed image.
     pub fn width(&self) -> usize {
         self.edges.len()
     }
 
+    /// Returns the height of the computed image.
     pub fn height(&self) -> usize {
-        self.edges.first().unwrap().len()
+        self.edges[0].len()
     }
 }
 
+impl ops::Index<usize> for Detection {
+    type Output = Edge;
+    fn index(&self, index: usize) -> &Self::Output {
+        let x = index % self.width();
+        let y = index / self.height();
+        &self.edges[x][y]
+    }
+}
+
+impl ops::Index<(usize, usize)> for Detection {
+    type Output = Edge;
+    fn index(&self, index: (usize, usize)) -> &Self::Output {
+        &self.edges[index.0][index.1]
+    }
+}
+
+
+/// The computed result for a single pixel.
 #[derive(Copy, Clone, Debug)]
 pub struct Edge {
-    pub vec_x: f32,
-    pub vec_y: f32,
-    pub magnitude: f32,
+    vec_x: f32,
+    vec_y: f32,
+    magnitude: f32,
 }
 
 impl Edge {
@@ -59,10 +80,47 @@ impl Edge {
     fn theta(&self) -> f32 {
         self.vec_y.atan2(self.vec_x)
     }
+
+    /// Returns a normalized vector of the direction of the change in brightness
+    ///
+    /// The vector will point away from the detected line.
+    /// E.g. a vertical line separating a dark area on the left and light area on the right will
+    /// have it's direction point towards the light area on the right.
+    pub fn dir_norm(&self) -> (f32, f32) {
+        (self.vec_x, self.vec_y)
+    }
+
+    /// The absolute magnitude of the change in brightness.
+    ///
+    /// Either 0 or 1.
+    pub fn magnitude(&self) -> f32 {
+        self.magnitude
+    }
 }
 
+
+/// Computes the canny edges of an image.
+///
+/// The variable `sigma` determines the size of the filter kernel which affects the precision and
+/// SNR of the computation:
+/// * A small sigma (3.0<) creates a kernel which is able to discern fine details but is more prone
+///   to noise.
+/// * Larger values result in detail being lost and are thus best used for detecting large
+///   features. Computation time also increases.
+///
+/// The `weak_threshold` and `strong_threshold` determine what detected pixels are to be regarded
+/// as edges and which should be discarded. They are compared with the absolute magnitude of the
+/// change in brightness.
+///
+/// # Panics:
+/// * If either `strong_threshold` or `weak_threshold` are outisde the range of 0 to 1 inclusive.
+/// * If `strong_threshold` is less than `weak_threshold`.
+/// * If `image` contains no pixels (either it's width or height is 0).
 pub fn canny<T: Into<image::GrayImage>>(image: T, sigma: f32, strong_threshold: f32, weak_threshold: f32) -> Detection {
-    let edges = detect_edges(&image.into(), sigma);
+    let gs_image = image.into();
+    assert!(gs_image.width() > 0);
+    assert!(gs_image.height() > 0);
+    let edges = detect_edges(&gs_image, sigma);
     let edges = minmax_suppression(&edges);
     let edges = hysteresis(&edges, strong_threshold, weak_threshold);
     Detection { edges }
@@ -236,6 +294,7 @@ fn minmax_suppression(edges: &Vec<Vec<Edge>>) -> Vec<Vec<Edge>> {
     .collect()
 }
 
+/// Links lines together and discards noise.
 fn hysteresis(edges: &Vec<Vec<Edge>>, strong_threshold: f32, weak_threshold: f32) -> Vec<Vec<Edge>> {
     assert!(0.0 < strong_threshold && strong_threshold < 1.0);
     assert!(0.0 < weak_threshold && weak_threshold < 1.0);
@@ -291,6 +350,7 @@ fn hysteresis(edges: &Vec<Vec<Edge>>, strong_threshold: f32, weak_threshold: f32
     }
     edges_out
 }
+
 
 #[cfg(test)]
 mod tests {
