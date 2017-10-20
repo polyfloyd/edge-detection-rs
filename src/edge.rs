@@ -4,6 +4,8 @@ use image;
 use rayon::prelude::*;
 
 
+const TAU: f32 = PI * 2.0;
+
 /// The result of a computation.
 #[derive(Clone)]
 pub struct Detection {
@@ -63,10 +65,10 @@ impl Edge {
         } else {
             vec_y
         };
-        let magnitude = (vec_x.powi(2) + vec_y.powi(2)).sqrt();
-        assert!(0.0 <= magnitude && magnitude <= 1.0);
+        let magnitude = f32::hypot(vec_x, vec_y);
+        debug_assert!(0.0 <= magnitude && magnitude <= 1.0);
         let frac_1_mag = if magnitude != 0.0 {
-            1.0 / magnitude
+            magnitude.recip()
         } else {
             1.0
         };
@@ -78,7 +80,7 @@ impl Edge {
     }
 
     fn theta(&self) -> f32 {
-        self.vec_y.atan2(self.vec_x)
+        f32::atan2(self.vec_y, self.vec_x)
     }
 
     /// Returns a normalized vector of the direction of the change in brightness
@@ -121,7 +123,7 @@ pub fn canny<T: Into<image::GrayImage>>(image: T, sigma: f32, strong_threshold: 
     assert!(gs_image.width() > 0);
     assert!(gs_image.height() > 0);
     let edges = detect_edges(&gs_image, sigma);
-    let edges = minmax_suppression(&edges);
+    let edges = minmax_suppression(&edges, weak_threshold);
     let edges = hysteresis(&edges, strong_threshold, weak_threshold);
     Detection { edges }
 }
@@ -129,10 +131,11 @@ pub fn canny<T: Into<image::GrayImage>>(image: T, sigma: f32, strong_threshold: 
 /// Calculates a 2nd order 2D gaussian derivative with size sigma.
 fn filter_kernel(sigma: f32) -> Vec<Vec<(f32, f32)>> {
     let size = (sigma * 10.0).round() as usize;
+    let mul_2_sigma_2 = 2.0 * sigma.powi(2);
     (0..size).map(|x| {
         (0..size).map(|y| {
             let (xf, yf) = (x as f32 - size as f32 / 2.0, y as f32 - size as f32 / 2.0);
-            let g = E.powf(-(xf.powi(2) + yf.powi(2)) / (2. * sigma.powi(2))) / (2.0 * sigma.powi(2));
+            let g = (-(xf.powi(2) + yf.powi(2)) / mul_2_sigma_2).exp() / mul_2_sigma_2;
             (xf * g, yf * g)
         })
         .collect()
@@ -151,7 +154,7 @@ fn neighbour_pos_delta(theta: f32) -> (i32, i32) {
         (0, -1),  // center top
         (1, -1),  // top right
     ];
-    let n = ((theta + PI * 2.0) % (2.0 * PI)) / (2.0 * PI);
+    let n = ((theta + TAU) % TAU) / TAU;
     let i = (n * 8.0).round() as usize % 8;
     neighbours[i]
 }
@@ -188,12 +191,12 @@ fn detect_edges(image: &image::GrayImage, sigma: f32) -> Vec<Vec<Edge>> {
 }
 
 /// Narrows the width of detected edges down to a single pixel.
-fn minmax_suppression(edges: &Vec<Vec<Edge>>) -> Vec<Vec<Edge>> {
+fn minmax_suppression(edges: &Vec<Vec<Edge>>, weak_threshold: f32) -> Vec<Vec<Edge>> {
     let (width, height) = (edges.len(), edges[0].len());
     (0..width).into_par_iter().map(|x| {
         (0..height).into_par_iter().map(|y| {
             let edge = edges[x][y];
-            if edge.magnitude < 0.0001 {
+            if edge.magnitude < weak_threshold {
                 // Skip distance computation for non-edges.
                 return Edge::new(0.0, 0.0);
             }
@@ -203,17 +206,17 @@ fn minmax_suppression(edges: &Vec<Vec<Edge>>) -> Vec<Vec<Edge>> {
                     // A vector confined to a box instead of a radius.
                     // The magnitude ranges from 1 to sqrt(2).
                     let box_vec = {
-                        let r = (1.0 / edge.vec_x.abs())
-                            .min(1.0 / edge.vec_y.abs());
+                        let r = edge.vec_x.abs().recip()
+                            .min(edge.vec_y.abs().recip());
                         (
                             edge.vec_x * r * side,
                             edge.vec_y * r * side,
                         )
                     };
-                    assert!((1.0 - box_vec.0.abs()).abs() <= 1e-6 || (1.0 - box_vec.1.abs()).abs() <= 1e-6);
-                    assert!(edge.vec_x.signum() * side == box_vec.0.signum());
-                    assert!(edge.vec_y.signum() * side == box_vec.1.signum());
-                    assert!({
+                    debug_assert!((1.0 - box_vec.0.abs()).abs() <= 1e-6 || (1.0 - box_vec.1.abs()).abs() <= 1e-6);
+                    debug_assert!(edge.vec_x.signum() * side == box_vec.0.signum());
+                    debug_assert!(edge.vec_y.signum() * side == box_vec.1.signum());
+                    debug_assert!({
                         let m = f32::hypot(box_vec.0, box_vec.1);
                         1.0 <= m && m <= SQRT_2
                     });
@@ -250,9 +253,9 @@ fn minmax_suppression(edges: &Vec<Vec<Edge>>) -> Vec<Vec<Edge>> {
                                 n,
                             )
                         };
-                        assert!(n >= 0.0);
+                        debug_assert!(n >= 0.0);
 
-                        let interpolated_magnitude = truncate(nb_a.unwrap_or(0.0) * (1.0 - n) + nb_b.unwrap_or(0.0) * n);
+                        let interpolated_magnitude = truncate(nb_a.unwrap_or(0.0).mul_add((1.0 - n), nb_b.unwrap_or(0.0) * n));
                         let trunc_edge_magnitude = truncate(edge.magnitude);
                         // Keep searching until either:
                         let end =
@@ -363,7 +366,7 @@ mod tests {
             for y in 0..height {
                 let edge = edges[x][y];
                 let pix = image.get_pixel_mut(x as u32, y as u32);
-                match (edge.theta() + (PI * 2.0 + FRAC_PI_4)) % (PI * 2.0) {
+                match (edge.theta() + (TAU + FRAC_PI_4)) % TAU {
                     t if t < FRAC_PI_2 => { // Right side
                         pix.data[0] = (edge.magnitude * 255.0) as u8;
                     },
@@ -402,7 +405,7 @@ mod tests {
         let edges = detect_edges(&image.to_luma(), sigma);
         edge_vectors_to_image(&edges).save(format!("{}.0-vectors.png", path)).unwrap();
         edges_to_image(&edges).save(format!("{}.1-edges.png", path)).unwrap();
-        let edges = minmax_suppression(&edges);
+        let edges = minmax_suppression(&edges, weak_threshold);
         edges_to_image(&edges).save(format!("{}.2-minmax.png", path)).unwrap();
         let edges = hysteresis(&edges, strong_threshold, weak_threshold);
         edges_to_image(&edges).save(format!("{}.3-hysteresis.png", path)).unwrap();
@@ -557,21 +560,21 @@ mod benchmarks {
     fn bench_minmax_suppression_low_sigma(b: &mut test::Bencher) {
         let image = image::open(IMG_PATH).unwrap().to_luma();
         let edges = detect_edges(&image, 1.2);
-        b.iter(|| minmax_suppression(&edges));
+        b.iter(|| minmax_suppression(&edges, 0.01));
     }
 
     #[bench]
     fn bench_minmax_suppression_high_sigma(b: &mut test::Bencher) {
         let image = image::open(IMG_PATH).unwrap().to_luma();
         let edges = detect_edges(&image, 5.0);
-        b.iter(|| minmax_suppression(&edges));
+        b.iter(|| minmax_suppression(&edges, 0.01));
     }
 
     #[bench]
     fn bench_hysteresis(b: &mut test::Bencher) {
         let image = image::open(IMG_PATH).unwrap().to_luma();
         let edges = detect_edges(&image, 1.2);
-        let edges = minmax_suppression(&edges);
+        let edges = minmax_suppression(&edges, 0.1);
         b.iter(|| hysteresis(&edges, 0.4, 0.1));
     }
 }
