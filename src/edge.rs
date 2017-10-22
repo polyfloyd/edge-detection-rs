@@ -22,6 +22,43 @@ impl Detection {
     pub fn height(&self) -> usize {
         self.edges[0].len()
     }
+
+    /// Renders the detected edges to an image.
+    ///
+    /// The intensity of the pixel represents the magnitude of the change in brightnes while the
+    /// color represents the direction.
+    ///
+    /// Useful for debugging.
+    pub fn as_image(&self) -> image::DynamicImage {
+        let img = image::RgbImage::from_fn(self.width() as u32, self.height() as u32, |x, y| {
+            let (h, s, v) = {
+                let edge = &self[(x as usize, y as usize)];
+                ((edge.theta() + TAU) % TAU, 1.0, edge.magnitude())
+            };
+            let (r, g, b) = {
+                // http://www.rapidtables.com/convert/color/hsv-to-rgb.htm
+                let c = v * s;
+                let x = c * (1.0 - ((h / FRAC_PI_3) % 2.0 - 1.0).abs());
+                let m = v - c;
+                let (r, g, b) = match h {
+                    h if h < FRAC_PI_3            => (c, x, 0.0),
+                    h if h < FRAC_PI_3 * 2.0      => (x, c, 0.0),
+                    h if h < PI                   => (0.0, c, x),
+                    h if h < PI + FRAC_PI_3       => (0.0, x, c),
+                    h if h < PI + FRAC_PI_3 * 2.0 => (x, 0.0, c),
+                    h if h < TAU                  => (c, 0.0, x),
+                    _                             => unreachable!(),
+                };
+                (r + m, g + m, b + m)
+            };
+            image::Rgb { data: [
+                (r * 255.0).round() as u8,
+                (g * 255.0).round() as u8,
+                (b * 255.0).round() as u8,
+            ]}
+        });
+        image::DynamicImage::ImageRgb8(img)
+    }
 }
 
 impl ops::Index<usize> for Detection {
@@ -360,34 +397,6 @@ fn hysteresis(edges: &Vec<Vec<Edge>>, strong_threshold: f32, weak_threshold: f32
 mod tests {
     use super::*;
 
-    fn edge_vectors_to_image(edges: &Vec<Vec<Edge>>) -> image::RgbImage {
-        let (width, height) = (edges.len(), edges.first().unwrap().len());
-        let mut image = image::RgbImage::from_pixel(width as u32, height as u32, image::Rgb{ data: [0, 0, 0] });
-        for x in 0..width {
-            for y in 0..height {
-                let edge = edges[x][y];
-                let pix = image.get_pixel_mut(x as u32, y as u32);
-                match (edge.theta() + (TAU + FRAC_PI_4)) % TAU {
-                    t if t < FRAC_PI_2 => { // Right side
-                        pix.data[0] = (edge.magnitude * 255.0) as u8;
-                    },
-                    t if t < PI => { // Bottom side
-                        pix.data[1] = (edge.magnitude * 255.0) as u8;
-                    },
-                    t if t < PI + FRAC_PI_2 => { // Left side
-                        pix.data[2] = (edge.magnitude * 255.0) as u8;
-                    },
-                    t if t < PI * 2.0 => { // Top side
-                        pix.data[0] = (edge.magnitude * 255.0) as u8;
-                        pix.data[1] = (edge.magnitude * 255.0) as u8;
-                    },
-                    _ => unreachable!(),
-                };
-            }
-        }
-        image
-    }
-
     fn edges_to_image(edges: &Vec<Vec<Edge>>) -> image::GrayImage {
         let (width, height) = (edges.len(), edges.first().unwrap().len());
         let mut image = image::GrayImage::from_pixel(width as u32, height as u32, image::Luma{ data: [0] });
@@ -404,13 +413,18 @@ mod tests {
         let path = path.as_ref();
         let image = image::open(path).unwrap();
         let edges = detect_edges(&image.to_luma(), sigma);
-        edge_vectors_to_image(&edges).save(format!("{}.0-vectors.png", path)).unwrap();
-        edges_to_image(&edges).save(format!("{}.1-edges.png", path)).unwrap();
-        let edges = minmax_suppression(&edges, weak_threshold);
+        let intermediage_d = Detection { edges };
+        let mut fd = fs::File::create(format!("{}.0-vectors.png", path)).unwrap();
+        intermediage_d.as_image().save(&mut fd, image::ImageFormat::PNG).unwrap();
+        edges_to_image(&intermediage_d.edges).save(format!("{}.1-edges.png", path)).unwrap();
+        let edges = minmax_suppression(&intermediage_d.edges, weak_threshold);
         edges_to_image(&edges).save(format!("{}.2-minmax.png", path)).unwrap();
         let edges = hysteresis(&edges, strong_threshold, weak_threshold);
         edges_to_image(&edges).save(format!("{}.3-hysteresis.png", path)).unwrap();
-        Detection { edges }
+        let detection = Detection { edges };
+        let mut fd = fs::File::create(format!("{}.4-result.png", path)).unwrap();
+        detection.as_image().save(&mut fd, image::ImageFormat::PNG).unwrap();
+        detection
     }
 
     #[test]
