@@ -1,6 +1,6 @@
 use std::*;
 use std::f32::consts::*;
-use image;
+use image::{self, GenericImage};
 use rayon::prelude::*;
 
 
@@ -167,18 +167,17 @@ pub fn canny<T: Into<image::GrayImage>>(image: T, sigma: f32, strong_threshold: 
 }
 
 /// Calculates a 2nd order 2D gaussian derivative with size sigma.
-fn filter_kernel(sigma: f32) -> Vec<Vec<(f32, f32)>> {
+fn filter_kernel(sigma: f32) -> (usize, Vec<(f32, f32)>) {
     let size = (sigma * 10.0).round() as usize;
     let mul_2_sigma_2 = 2.0 * sigma.powi(2);
-    (0..size).map(|x| {
-        (0..size).map(|y| {
+    let kernel = (0..size).flat_map(|y| {
+        (0..size).map(move |x| {
             let (xf, yf) = (x as f32 - size as f32 / 2.0, y as f32 - size as f32 / 2.0);
             let g = (-(xf.powi(2) + yf.powi(2)) / mul_2_sigma_2).exp() / mul_2_sigma_2;
             (xf * g, yf * g)
         })
-        .collect()
-    })
-    .collect()
+    }).collect();
+    (size, kernel)
 }
 
 fn neighbour_pos_delta(theta: f32) -> (i32, i32) {
@@ -202,28 +201,34 @@ fn neighbour_pos_delta(theta: f32) -> (i32, i32) {
 /// `sigma` determines the radius of the Gaussian kernel.
 fn detect_edges(image: &image::GrayImage, sigma: f32) -> Vec<Vec<Edge>> {
     let (width, height) = (image.width() as i32, image.height() as i32);
-    let kernel = filter_kernel(sigma);
-    (0..width).into_par_iter().map(|ix| {
-        (0..height).into_par_iter().map(|iy| {
-            let ks = kernel.len() as i32;
-            let (sum_x, sum_y) = kernel.iter()
-                .zip(-ks / 2..ks / 2)
-                .flat_map(|(col, kx)| {
-                    col.iter()
-                        .zip(-ks / 2..ks / 2)
-                        .map(move |(k, ky)| {
-                            // Clamp x and y within the image bounds so no non-existing borders are be
-                            // detected based on some background color outside image bounds.
-                            let x = (ix + kx).min(width - 1).max(0);
-                            let y = (iy + ky).min(height - 1).max(0);
-                            let pix = image.get_pixel(x as u32, y as u32).data[0] as f32 / 255.0;
-                            (pix * k.0, pix * k.1)
-                        })
-                })
-                .fold((0.0, 0.0), |accum, pix| (accum.0 + pix.0, accum.1 + pix.1));
-            Edge::new(sum_x, sum_y)
-        })
-        .collect()
+    let (ksize, g_kernel) = filter_kernel(sigma);
+    let ks = ksize as i32;
+    (0..width).into_par_iter().map(|g_ix| {
+        let ix = g_ix;
+        let kernel = &g_kernel;
+        (0..height).into_par_iter().map(move |iy| {
+            let mut sum_x = 0.0;
+            let mut sum_y = 0.0;
+
+            for kyi in 0..ks {
+                let ky = kyi - ks / 2;
+                for kxi in 0..ks {
+                    let kx = kxi - ks / 2;
+                    let k = kernel[(kyi * ks + kxi) as usize];
+
+                    let pix = unsafe {
+                        // Clamp x and y within the image bounds so no non-existing borders are be
+                        // detected based on some background color outside image bounds.
+                        let x = (ix + kx).max(0).min(width - 1);
+                        let y = (iy + ky).max(0).min(height - 1);
+                        image.unsafe_get_pixel(x as u32, y as u32).data[0] as f32
+                    };
+                    sum_x += pix * k.0;
+                    sum_y += pix * k.1;
+                }
+            }
+            Edge::new(sum_x / 255.0, sum_y / 255.0)
+        }).collect()
     })
     .collect()
 }
@@ -462,16 +467,13 @@ mod tests {
         // The integral for the filter kernel should approximate 0.
         for sigma_i in 1..200 {
             let sigma = sigma_i as f32 / 10.0;
-            let kernel = filter_kernel(sigma);
-            let ksize = kernel.len();
-            assert!(kernel.len() == kernel[0].len());
+            let (ksize, kernel) = filter_kernel(sigma);
+            assert!(ksize.pow(2) == kernel.len());
             let mut sum_x = 0.0;
             let mut sum_y = 0.0;
-            for col in kernel {
-                for (gx, gy) in col {
-                    sum_x += gx;
-                    sum_y += gy;
-                }
+            for (gx, gy) in kernel {
+                sum_x += gx;
+                sum_y += gy;
             }
             println!("sum = ({}, {}), sigma = {}, kernel_size = {}", sum_x, sum_y, sigma, ksize);
             assert!(-0.0001 < sum_x && sum_x <= 0.0001);
