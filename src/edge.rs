@@ -6,6 +6,18 @@ use rayon::prelude::*;
 
 const TAU: f32 = PI * 2.0;
 
+#[inline(always)]
+fn clamp<T: PartialOrd>(f: T, lo: T, hi: T) -> T {
+    debug_assert!(lo < hi);
+    if f > hi {
+        hi
+    } else if f < lo {
+        lo
+    } else {
+        f
+    }
+}
+
 /// The result of a computation.
 #[derive(Clone)]
 pub struct Detection {
@@ -88,20 +100,8 @@ pub struct Edge {
 
 impl Edge {
     fn new(vec_x: f32, vec_y: f32) -> Edge {
-        let vec_x = FRAC_1_SQRT_2 * if vec_x > 1.0 {
-            1.0
-        } else if vec_x < -1.0 {
-            -1.0
-        } else {
-            vec_x
-        };
-        let vec_y = FRAC_1_SQRT_2 * if vec_y > 1.0 {
-            1.0
-        } else if vec_y < -1.0 {
-            -1.0
-        } else {
-            vec_y
-        };
+        let vec_x = FRAC_1_SQRT_2 * clamp(vec_x, -1.0, 1.0);
+        let vec_y = FRAC_1_SQRT_2 * clamp(vec_y, -1.0, 1.0);
         let magnitude = f32::hypot(vec_x, vec_y);
         debug_assert!(0.0 <= magnitude && magnitude <= 1.0);
         let frac_1_mag = if magnitude != 0.0 {
@@ -223,8 +223,8 @@ fn detect_edges(image: &image::GrayImage, sigma: f32) -> Vec<Vec<Edge>> {
                     let pix = unsafe {
                         // Clamp x and y within the image bounds so no non-existing borders are be
                         // detected based on some background color outside image bounds.
-                        let x = (ix + kx).max(0).min(width - 1);
-                        let y = (iy + ky).max(0).min(height - 1);
+                        let x = clamp(ix + kx, 0, width - 1);
+                        let y = clamp(iy + ky, 0, height - 1);
                         image.unsafe_get_pixel(x as u32, y as u32).data[0] as f32
                     };
                     sum_x += pix * k.0;
@@ -291,8 +291,8 @@ fn minmax_suppression(edges: &Vec<Vec<Edge>>, weak_threshold: f32) -> Vec<Vec<Ed
                 let (nb_a, nb_b, n) = if seek_pos.0.abs().fract() < seek_pos.1.abs().fract() {
                     // X is closest to a point.
                     let x = seek_pos.0.round() as usize;
-                    let y1 = (seek_pos.1.floor().max(0.0) as usize).min(height - 1);
-                    let y2 = (seek_pos.1.ceil() as usize).max(0).min(height - 1);
+                    let y1 = clamp(seek_pos.1.floor() as isize, 0, height as isize - 1) as usize;
+                    let y2 = clamp(seek_pos.1.ceil() as usize, 0, height - 1);
                     let n = (seek_pos.1.fract() + 1.0).fract();
                     (
                         edges.get(x).map(|col| col[y1]).map(|e| e.magnitude),
@@ -302,8 +302,8 @@ fn minmax_suppression(edges: &Vec<Vec<Edge>>, weak_threshold: f32) -> Vec<Vec<Ed
                 } else {
                     // Y is closest to a point.
                     let y = seek_pos.1.round() as usize;
-                    let x1 = (seek_pos.0.floor().max(0.0) as usize).min(width - 1);
-                    let x2 = (seek_pos.0.ceil() as usize).max(0).min(width - 1);
+                    let x1 = clamp(seek_pos.0.floor() as isize, 0, width as isize - 1) as usize;
+                    let x2 = clamp(seek_pos.0.ceil() as usize, 0, width - 1);
                     let n = (seek_pos.0.fract() + 1.0).fract();
                     (
                         edges[x1].get(y).map(|e| e.magnitude),
