@@ -244,80 +244,94 @@ fn minmax_suppression(edges: &Vec<Vec<Edge>>, weak_threshold: f32) -> Vec<Vec<Ed
                 return Edge::new(0.0, 0.0);
             }
 
-            let distances: Vec<i32> = [1.0, -1.0].into_iter()
-                .map(|side| {
-                    // A vector confined to a box instead of a radius.
-                    // The magnitude ranges from 1 to sqrt(2).
-                    let box_vec = {
-                        let r = edge.vec_x.abs().recip()
-                            .min(edge.vec_y.abs().recip());
-                        (
-                            edge.vec_x * r * side,
-                            edge.vec_y * r * side,
-                        )
-                    };
-                    debug_assert!((1.0 - box_vec.0.abs()).abs() <= 1e-6 || (1.0 - box_vec.1.abs()).abs() <= 1e-6);
-                    debug_assert!(edge.vec_x.signum() * side == box_vec.0.signum());
-                    debug_assert!(edge.vec_y.signum() * side == box_vec.1.signum());
-                    debug_assert!({
-                        let m = f32::hypot(box_vec.0, box_vec.1);
-                        1.0 <= m && m <= SQRT_2
-                    });
+            // A vector confined to a box instead of a radius.
+            // The magnitude ranges from 1 to sqrt(2).
+            let box_vec = {
+                let r = edge.vec_x.abs().recip()
+                    .min(edge.vec_y.abs().recip());
+                (
+                    edge.vec_x * r,
+                    edge.vec_y * r,
+                )
+            };
+            debug_assert!((1.0 - box_vec.0.abs()).abs() <= 1e-6 || (1.0 - box_vec.1.abs()).abs() <= 1e-6);
+            debug_assert!({
+                let m = f32::hypot(box_vec.0, box_vec.1);
+                1.0 <= m && m <= SQRT_2
+            });
 
-                    // Truncating the edge magnitudes helps mitigate rounding errors for thick edges.
-                    let truncate = |f: f32| (f * 1e5).round() * 1e-6;
+            // Truncating the edge magnitudes helps mitigate rounding errors for thick edges.
+            let truncate = |f: f32| (f * 1e5).round() * 1e-6;
 
-                    let mut seek_pos = (x as f32, y as f32);
-                    let mut seek_magnitude = truncate(edge.magnitude);
-                    let mut distance = 0;
-                    loop {
-                        seek_pos.0 += box_vec.0;
-                        seek_pos.1 += box_vec.1;
-                        let (nb_a, nb_b, n) = if seek_pos.0.abs().fract() < seek_pos.1.abs().fract() {
-                            // X is closest to a point.
-                            let x = seek_pos.0.round() as usize;
-                            let y1 = (seek_pos.1.floor().max(0.0) as usize).min(height - 1);
-                            let y2 = (seek_pos.1.ceil() as usize).max(0).min(height - 1);
-                            let n = (seek_pos.1.fract() + 1.0).fract();
-                            (
-                                edges.get(x).map(|col| col[y1]).map(|e| e.magnitude),
-                                edges.get(x).map(|col| col[y2]).map(|e| e.magnitude),
-                                n,
-                            )
-                        } else {
-                            // Y is closest to a point.
-                            let y = seek_pos.1.round() as usize;
-                            let x1 = (seek_pos.0.floor().max(0.0) as usize).min(width - 1);
-                            let x2 = (seek_pos.0.ceil() as usize).max(0).min(width - 1);
-                            let n = (seek_pos.0.fract() + 1.0).fract();
-                            (
-                                edges[x1].get(y).map(|e| e.magnitude),
-                                edges[x2].get(y).map(|e| e.magnitude),
-                                n,
-                            )
-                        };
-                        debug_assert!(n >= 0.0);
+            // Find out the current pixel represents the highest, most intense, point of an edge by
+            // traveling in a direction perpendicular to the edge to see if there are any more
+            // intense edges that are supposedly part of the current edge.
+            //
+            // We travel in both directions concurrently, this enables us to stop if one side
+            // extends longer than the other, greatly improving performance.
+            let mut select = 0;
+            let mut select_flip_bit = 1;
 
-                        let interpolated_magnitude = truncate(nb_a.unwrap_or(0.0).mul_add((1.0 - n), nb_b.unwrap_or(0.0) * n));
-                        let trunc_edge_magnitude = truncate(edge.magnitude);
-                        // Keep searching until either:
-                        let end =
-                            // The next edge has a lesser magnitude than the reference edge.
-                            interpolated_magnitude < trunc_edge_magnitude
-                            // The gradient increases, meaning we are going up against an (other) edge.
-                            || seek_magnitude > trunc_edge_magnitude && interpolated_magnitude < seek_magnitude
-                            // We've crossed the image border.
-                            || nb_a.is_none() || nb_b.is_none();
-                        if end {
-                            break;
-                        }
+            // The parameters and variables for each side.
+            let inversion = [1.0, -1.0];
+            let mut distances = [0i32; 2];
+            let mut seek_positions = [(x as f32, y as f32); 2];
+            let mut seek_magnitudes = [truncate(edge.magnitude); 2];
 
-                        seek_magnitude = interpolated_magnitude;
-                        distance += 1;
+            while (distances[0] - distances[1]).abs() <= 1 {
+                let seek_pos = &mut seek_positions[select];
+                let seek_magnitude = &mut seek_magnitudes[select];
+
+                seek_pos.0 += box_vec.0 * inversion[select];
+                seek_pos.1 += box_vec.1 * inversion[select];
+                let (nb_a, nb_b, n) = if seek_pos.0.abs().fract() < seek_pos.1.abs().fract() {
+                    // X is closest to a point.
+                    let x = seek_pos.0.round() as usize;
+                    let y1 = (seek_pos.1.floor().max(0.0) as usize).min(height - 1);
+                    let y2 = (seek_pos.1.ceil() as usize).max(0).min(height - 1);
+                    let n = (seek_pos.1.fract() + 1.0).fract();
+                    (
+                        edges.get(x).map(|col| col[y1]).map(|e| e.magnitude),
+                        edges.get(x).map(|col| col[y2]).map(|e| e.magnitude),
+                        n,
+                    )
+                } else {
+                    // Y is closest to a point.
+                    let y = seek_pos.1.round() as usize;
+                    let x1 = (seek_pos.0.floor().max(0.0) as usize).min(width - 1);
+                    let x2 = (seek_pos.0.ceil() as usize).max(0).min(width - 1);
+                    let n = (seek_pos.0.fract() + 1.0).fract();
+                    (
+                        edges[x1].get(y).map(|e| e.magnitude),
+                        edges[x2].get(y).map(|e| e.magnitude),
+                        n,
+                    )
+                };
+                debug_assert!(n >= 0.0);
+
+                let interpolated_magnitude = truncate(nb_a.unwrap_or(0.0).mul_add((1.0 - n), nb_b.unwrap_or(0.0) * n));
+                let trunc_edge_magnitude = truncate(edge.magnitude);
+                // Keep searching until either:
+                let end =
+                    // The next edge has a lesser magnitude than the reference edge.
+                    interpolated_magnitude < trunc_edge_magnitude
+                    // The gradient increases, meaning we are going up against an (other) edge.
+                    || *seek_magnitude > trunc_edge_magnitude && interpolated_magnitude < *seek_magnitude
+                    // We've crossed the image border.
+                    || nb_a.is_none() || nb_b.is_none();
+                *seek_magnitude = interpolated_magnitude;
+                distances[select] += 1;
+
+                // Switch to the other side.
+                select ^= select_flip_bit;
+                if end {
+                    if select_flip_bit == 0 {
+                        break;
                     }
-                    distance
-                })
-                .collect();
+                    // After switching to the other side, we set the XOR bit to 0 so we stay there.
+                    select_flip_bit = 0;
+                }
+            }
 
             // Equal distances denote the middle of the edge.
             // A deviation of 1 is allowed for edges over two equal pixels, in which case, the
