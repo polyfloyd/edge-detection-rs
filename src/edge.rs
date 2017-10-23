@@ -214,7 +214,11 @@ fn detect_edges(image: &image::GrayImage, sigma: f32) -> Vec<Vec<Edge>> {
                 let ky = kyi - ks / 2;
                 for kxi in 0..ks {
                     let kx = kxi - ks / 2;
-                    let k = kernel[(kyi * ks + kxi) as usize];
+                    let k = unsafe {
+                        let i = (kyi * ks + kxi) as usize;
+                        debug_assert!(i < kernel.len());
+                        kernel.get_unchecked(i)
+                    };
 
                     let pix = unsafe {
                         // Clamp x and y within the image bounds so no non-existing borders are be
