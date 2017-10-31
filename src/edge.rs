@@ -116,7 +116,10 @@ impl Edge {
         }
     }
 
-    fn theta(&self) -> f32 {
+    /// The direction of the gradient in radians.
+    ///
+    /// This is a convenience function for `atan2(direction)`.
+    pub fn theta(&self) -> f32 {
         f32::atan2(self.vec_y, self.vec_x)
     }
 
