@@ -45,7 +45,7 @@ impl Detection {
         let img = image::RgbImage::from_fn(self.width() as u32, self.height() as u32, |x, y| {
             let (h, s, v) = {
                 let edge = &self[(x as usize, y as usize)];
-                ((edge.theta() + TAU) % TAU, 1.0, edge.magnitude())
+                ((edge.angle() + TAU) % TAU, 1.0, edge.magnitude())
             };
             let (r, g, b) = {
                 // http://www.rapidtables.com/convert/color/hsv-to-rgb.htm
@@ -119,7 +119,7 @@ impl Edge {
     /// The direction of the gradient in radians.
     ///
     /// This is a convenience function for `atan2(direction)`.
-    pub fn theta(&self) -> f32 {
+    pub fn angle(&self) -> f32 {
         f32::atan2(self.vec_y, self.vec_x)
     }
 
@@ -385,7 +385,7 @@ fn hysteresis(edges: &Vec<Vec<Edge>>, strong_threshold: f32, weak_threshold: f32
                     // Attempt to find the next line-segment of the edge in tree directions ahead.
                     let (nb_pos, nb_magnitude) = [FRAC_PI_4, 0.0, -FRAC_PI_4].into_iter()
                         .map(|bearing| {
-                            neighbour_pos_delta(edge.theta() + FRAC_PI_2 + side + bearing)
+                            neighbour_pos_delta(edge.angle() + FRAC_PI_2 + side + bearing)
                         })
                         // Filter out hypothetical neighbours that are outside image bounds.
                         .filter_map(|(nb_dx, nb_dy)| {
@@ -543,7 +543,7 @@ mod tests {
         let x = detect_vertical_line(&d);
         // The direction of the line's surface normal should follow the X-axis.
         for y in 0..d.height() {
-            assert!(d.edges[x][y].theta().abs() < 1e-5);
+            assert!(d.edges[x][y].angle().abs() < 1e-5);
         }
     }
 
@@ -553,7 +553,7 @@ mod tests {
         let x = detect_vertical_line(&d);
         // The direction of the line's surface normal should follow the X-axis.
         for y in 0..d.height() {
-            assert!(d.edges[x][y].theta().abs() < 0.01);
+            assert!(d.edges[x][y].angle().abs() < 0.01);
         }
     }
 
