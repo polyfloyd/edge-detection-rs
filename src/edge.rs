@@ -123,6 +123,11 @@ impl Edge {
         f32::atan2(self.vec_y, self.vec_x)
     }
 
+    /// Returns the direction of the edge scaled by it's magnitude.
+    pub fn dir(&self) -> (f32, f32) {
+        (self.vec_x * self.magnitude(), self.vec_y * self.magnitude())
+    }
+
     /// Returns a normalized vector of the direction of the change in brightness
     ///
     /// The vector will point away from the detected line.
@@ -134,7 +139,7 @@ impl Edge {
 
     /// The absolute magnitude of the change in brightness.
     ///
-    /// Either 0 or 1.
+    /// Between 0 and 1 inclusive.
     pub fn magnitude(&self) -> f32 {
         self.magnitude
     }
@@ -381,7 +386,7 @@ fn hysteresis(edges: &Vec<Vec<Edge>>, strong_threshold: f32, weak_threshold: f32
                 let mut current_pos = (x, y);
                 loop {
                     let edge = edges[current_pos.0][current_pos.1];
-                    edges_out[current_pos.0][current_pos.1] = Edge { magnitude: 1.0, .. edge };
+                    edges_out[current_pos.0][current_pos.1] = edge;
                     // Attempt to find the next line-segment of the edge in tree directions ahead.
                     let (nb_pos, nb_magnitude) = [FRAC_PI_4, 0.0, -FRAC_PI_4].into_iter()
                         .map(|bearing| {
@@ -407,7 +412,7 @@ fn hysteresis(edges: &Vec<Vec<Edge>>, strong_threshold: f32, weak_threshold: f32
                                 (max_pos, max_mag)
                             }
                         });
-                    if nb_magnitude < weak_threshold || edges_out[nb_pos.0][nb_pos.1].magnitude >= strong_threshold {
+                    if nb_magnitude < weak_threshold || edges_out[nb_pos.0][nb_pos.1].magnitude > weak_threshold {
                         break;
                     }
                     current_pos = nb_pos;
@@ -523,7 +528,7 @@ mod tests {
         // The line should be continuous.
         for y in 0..detection.height() {
             let edge = detection.edges[line_x][y];
-            assert!(edge.magnitude == 1.0);
+            assert!(edge.magnitude > 0.0);
         }
         // The line should be the only thing detected.
         for x in 0..detection.width() {
