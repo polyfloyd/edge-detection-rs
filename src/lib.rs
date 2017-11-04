@@ -1,7 +1,8 @@
 #![cfg_attr(all(test, feature = "unstable"), feature(test))]
 #![warn(missing_docs)]
 
-//! A library for detecting edges in images.
+//! An implementation of the Canny edge detection algorithm in Rust. The base for
+//! many computer vision applications.
 //!
 //! # Finding the edges in an image
 //!
