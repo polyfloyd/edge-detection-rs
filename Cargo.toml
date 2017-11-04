@@ -15,6 +15,9 @@ include = [
     "Cargo.toml",
 ]
 
+[badges]
+travis-ci = { repository = "polyfloyd/edge-detection-rs", branch = "master" }
+
 [features]
 unstable = []
 
