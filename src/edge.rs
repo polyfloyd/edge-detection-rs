@@ -35,6 +35,38 @@ impl Detection {
         self.edges[0].len()
     }
 
+    /// Linearly interpolates the edge at the specified location.
+    ///
+    /// Similar to as if the edges detection were continuous.
+    pub fn interpolate(&self, x: f32, y: f32) -> Edge {
+        let ax = clamp(x.floor() as isize, 0, self.width() as isize - 1) as usize;
+        let ay = clamp(y.floor() as isize, 0, self.height() as isize - 1) as usize;
+        let bx = clamp(x.ceil() as isize, 0, self.width() as isize - 1) as usize;
+        let by = clamp(y.ceil() as isize, 0, self.height() as isize - 1) as usize;
+        let e1 = self.edges[ax][ay];
+        let e2 = self.edges[bx][ay];
+        let e3 = self.edges[ax][by];
+        let e4 = self.edges[bx][by];
+        let nx = (x.fract() + 1.0).fract();
+        let ny = (y.fract() + 1.0).fract();
+
+        let x1 = Edge {
+            magnitude: e1.magnitude * (1.0 - nx) + e2.magnitude * nx,
+            vec_x: e1.vec_x * (1.0 - nx) + e2.vec_x * nx,
+            vec_y: e1.vec_y * (1.0 - nx) + e2.vec_y * nx,
+        };
+        let x2 = Edge {
+            magnitude: e3.magnitude * (1.0 - nx) + e4.magnitude * nx,
+            vec_x: e3.vec_x * (1.0 - nx) + e4.vec_x * nx,
+            vec_y: e3.vec_y * (1.0 - nx) + e4.vec_y * nx,
+        };
+        Edge {
+            magnitude: x1.magnitude * (1.0 - ny) + x2.magnitude * ny,
+            vec_x: x1.vec_x * (1.0 - ny) + x2.vec_x * ny,
+            vec_y: x1.vec_y * (1.0 - ny) + x2.vec_y * ny,
+        }
+    }
+
     /// Renders the detected edges to an image.
     ///
     /// The intensity of the pixel represents the magnitude of the change in brightnes while the
@@ -169,7 +201,7 @@ pub fn canny<T: Into<image::GrayImage>>(image: T, sigma: f32, strong_threshold: 
     assert!(gs_image.width() > 0);
     assert!(gs_image.height() > 0);
     let edges = detect_edges(&gs_image, sigma);
-    let edges = minmax_suppression(&edges, weak_threshold);
+    let edges = minmax_suppression(&Detection{ edges }, weak_threshold);
     let edges = hysteresis(&edges, strong_threshold, weak_threshold);
     Detection { edges }
 }
@@ -246,32 +278,15 @@ fn detect_edges(image: &image::GrayImage, sigma: f32) -> Vec<Vec<Edge>> {
 }
 
 /// Narrows the width of detected edges down to a single pixel.
-fn minmax_suppression(edges: &Vec<Vec<Edge>>, weak_threshold: f32) -> Vec<Vec<Edge>> {
-    let (width, height) = (edges.len(), edges[0].len());
+fn minmax_suppression(edges: &Detection, weak_threshold: f32) -> Vec<Vec<Edge>> {
+    let (width, height) = (edges.edges.len(), edges.edges[0].len());
     (0..width).into_par_iter().map(|x| {
         (0..height).into_par_iter().map(|y| {
-            let edge = edges[x][y];
+            let edge = edges.edges[x][y];
             if edge.magnitude < weak_threshold {
                 // Skip distance computation for non-edges.
                 return Edge::new(0.0, 0.0);
             }
-
-            // A vector confined to a box instead of a radius.
-            // The magnitude ranges from 1 to sqrt(2).
-            let box_vec = {
-                let r = edge.vec_x.abs().recip()
-                    .min(edge.vec_y.abs().recip());
-                (
-                    edge.vec_x * r,
-                    edge.vec_y * r,
-                )
-            };
-            debug_assert!((1.0 - box_vec.0.abs()).abs() <= 1e-6 || (1.0 - box_vec.1.abs()).abs() <= 1e-6);
-            debug_assert!({
-                let m = f32::hypot(box_vec.0, box_vec.1);
-                1.0 <= m && m <= SQRT_2
-            });
-
             // Truncating the edge magnitudes helps mitigate rounding errors for thick edges.
             let truncate = |f: f32| (f * 1e5).round() * 1e-6;
 
@@ -285,7 +300,7 @@ fn minmax_suppression(edges: &Vec<Vec<Edge>>, weak_threshold: f32) -> Vec<Vec<Ed
             let mut select_flip_bit = 1;
 
             // The parameters and variables for each side.
-            let inversion = [1.0, -1.0];
+            let directions = [1.0, -1.0];
             let mut distances = [0i32; 2];
             let mut seek_positions = [(x as f32, y as f32); 2];
             let mut seek_magnitudes = [truncate(edge.magnitude); 2];
@@ -293,44 +308,19 @@ fn minmax_suppression(edges: &Vec<Vec<Edge>>, weak_threshold: f32) -> Vec<Vec<Ed
             while (distances[0] - distances[1]).abs() <= 1 {
                 let seek_pos = &mut seek_positions[select];
                 let seek_magnitude = &mut seek_magnitudes[select];
+                let direction = directions[select];
 
-                seek_pos.0 += box_vec.0 * inversion[select];
-                seek_pos.1 += box_vec.1 * inversion[select];
-                let (nb_a, nb_b, n) = if seek_pos.0.abs().fract() < seek_pos.1.abs().fract() {
-                    // X is closest to a point.
-                    let x = seek_pos.0.round() as usize;
-                    let y1 = clamp(seek_pos.1.floor() as isize, 0, height as isize - 1) as usize;
-                    let y2 = clamp(seek_pos.1.ceil() as usize, 0, height - 1);
-                    let n = (seek_pos.1.fract() + 1.0).fract();
-                    (
-                        edges.get(x).map(|col| col[y1]).map(|e| e.magnitude),
-                        edges.get(x).map(|col| col[y2]).map(|e| e.magnitude),
-                        n,
-                    )
-                } else {
-                    // Y is closest to a point.
-                    let y = seek_pos.1.round() as usize;
-                    let x1 = clamp(seek_pos.0.floor() as isize, 0, width as isize - 1) as usize;
-                    let x2 = clamp(seek_pos.0.ceil() as usize, 0, width - 1);
-                    let n = (seek_pos.0.fract() + 1.0).fract();
-                    (
-                        edges[x1].get(y).map(|e| e.magnitude),
-                        edges[x2].get(y).map(|e| e.magnitude),
-                        n,
-                    )
-                };
-                debug_assert!(n >= 0.0);
+                seek_pos.0 += edge.dir_norm().0 * direction;
+                seek_pos.1 += edge.dir_norm().1 * direction;
+                let interpolated_magnitude = truncate(edges.interpolate(seek_pos.0, seek_pos.1).magnitude());
 
-                let interpolated_magnitude = truncate(nb_a.unwrap_or(0.0).mul_add((1.0 - n), nb_b.unwrap_or(0.0) * n));
                 let trunc_edge_magnitude = truncate(edge.magnitude);
                 // Keep searching until either:
                 let end =
                     // The next edge has a lesser magnitude than the reference edge.
                     interpolated_magnitude < trunc_edge_magnitude
                     // The gradient increases, meaning we are going up against an (other) edge.
-                    || *seek_magnitude > trunc_edge_magnitude && interpolated_magnitude < *seek_magnitude
-                    // We've crossed the image border.
-                    || nb_a.is_none() || nb_b.is_none();
+                    || *seek_magnitude > trunc_edge_magnitude && interpolated_magnitude < *seek_magnitude;
                 *seek_magnitude = interpolated_magnitude;
                 distances[select] += 1;
 
@@ -448,7 +438,7 @@ mod tests {
         let mut fd = fs::File::create(format!("{}.0-vectors.png", path)).unwrap();
         intermediage_d.as_image().save(&mut fd, image::ImageFormat::PNG).unwrap();
         edges_to_image(&intermediage_d.edges).save(format!("{}.1-edges.png", path)).unwrap();
-        let edges = minmax_suppression(&intermediage_d.edges, weak_threshold);
+        let edges = minmax_suppression(&intermediage_d, weak_threshold);
         edges_to_image(&edges).save(format!("{}.2-minmax.png", path)).unwrap();
         let edges = hysteresis(&edges, strong_threshold, weak_threshold);
         edges_to_image(&edges).save(format!("{}.3-hysteresis.png", path)).unwrap();
@@ -486,6 +476,29 @@ mod tests {
         assert!(FRAC_1_SQRT_2 - 1e-5 < e.vec_x && e.vec_x < FRAC_1_SQRT_2 + 1e-6);
         assert!(FRAC_1_SQRT_2 - 1e-5 < e.vec_y && e.vec_y < FRAC_1_SQRT_2 + 1e-6);
         assert!(1.0 - 1e-6 < e.magnitude && e.magnitude < 1.0 + 1e-6);
+    }
+
+    #[test]
+    fn detection_interpolate() {
+        let dummy = |magnitude| Edge {
+            magnitude,
+            vec_x: 0.0,
+            vec_y: 0.0,
+        };
+        let d = Detection {
+            edges: vec![
+                vec![dummy(2.0), dummy(8.0)],
+                vec![dummy(4.0), dummy(16.0)],
+            ],
+        };
+        assert!((d.interpolate(0.0, 0.0).magnitude() - 2.0).abs() <= 1e-6);
+        assert!((d.interpolate(1.0, 0.0).magnitude() - 4.0).abs() <= 1e-6);
+        assert!((d.interpolate(0.0, 1.0).magnitude() - 8.0).abs() <= 1e-6);
+        assert!((d.interpolate(1.0, 1.0).magnitude() - 16.0).abs() <= 1e-6);
+        assert!((d.interpolate(0.5, 0.0).magnitude() - 3.0).abs() <= 1e-6);
+        assert!((d.interpolate(0.0, 0.5).magnitude() - 5.0).abs() <= 1e-6);
+        assert!((d.interpolate(0.5, 1.0).magnitude() - 12.0).abs() <= 1e-6);
+        assert!((d.interpolate(1.0, 0.5).magnitude() - 10.0).abs() <= 1e-6);
     }
 
     #[test]
@@ -602,21 +615,21 @@ mod benchmarks {
     #[bench]
     fn bench_minmax_suppression_low_sigma(b: &mut test::Bencher) {
         let image = image::open(IMG_PATH).unwrap().to_luma();
-        let edges = detect_edges(&image, 1.2);
+        let edges = Detection { edges: detect_edges(&image, 1.2) };
         b.iter(|| minmax_suppression(&edges, 0.01));
     }
 
     #[bench]
     fn bench_minmax_suppression_high_sigma(b: &mut test::Bencher) {
         let image = image::open(IMG_PATH).unwrap().to_luma();
-        let edges = detect_edges(&image, 5.0);
+        let edges = Detection { edges: detect_edges(&image, 5.0) };
         b.iter(|| minmax_suppression(&edges, 0.01));
     }
 
     #[bench]
     fn bench_hysteresis(b: &mut test::Bencher) {
         let image = image::open(IMG_PATH).unwrap().to_luma();
-        let edges = detect_edges(&image, 1.2);
+        let edges = Detection { edges: detect_edges(&image, 1.2) };
         let edges = minmax_suppression(&edges, 0.1);
         b.iter(|| hysteresis(&edges, 0.4, 0.1));
     }
