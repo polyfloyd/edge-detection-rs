@@ -18,6 +18,9 @@ include = [
 [badges]
 travis-ci = { repository = "polyfloyd/edge-detection-rs", branch = "master" }
 
+[profile.dev]
+opt-level = 3
+
 [features]
 unstable = []
 
