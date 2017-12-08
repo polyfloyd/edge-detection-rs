@@ -25,5 +25,5 @@ opt-level = 3
 unstable = []
 
 [dependencies]
-image = "0.17.0"
-rayon = "0.8.2"
+image = "0.18.0"
+rayon = "0.9.0"
