@@ -2,6 +2,7 @@
 *.swo
 
 /target
+/Cargo.lock
 
 *.0-vectors.png
 *.1-edges.png
