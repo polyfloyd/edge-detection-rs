@@ -435,16 +435,14 @@ mod tests {
         let image = image::open(path).unwrap();
         let edges = detect_edges(&image.to_luma(), sigma);
         let intermediage_d = Detection { edges };
-        let mut fd = fs::File::create(format!("{}.0-vectors.png", path)).unwrap();
-        intermediage_d.as_image().save(&mut fd, image::ImageFormat::PNG).unwrap();
+        intermediage_d.as_image().save(format!("{}.0-vectors.png", path)).unwrap();
         edges_to_image(&intermediage_d.edges).save(format!("{}.1-edges.png", path)).unwrap();
         let edges = minmax_suppression(&intermediage_d, weak_threshold);
         edges_to_image(&edges).save(format!("{}.2-minmax.png", path)).unwrap();
         let edges = hysteresis(&edges, strong_threshold, weak_threshold);
         edges_to_image(&edges).save(format!("{}.3-hysteresis.png", path)).unwrap();
         let detection = Detection { edges };
-        let mut fd = fs::File::create(format!("{}.4-result.png", path)).unwrap();
-        detection.as_image().save(&mut fd, image::ImageFormat::PNG).unwrap();
+        detection.as_image().save(format!("{}.4-result.png", path)).unwrap();
         detection
     }
 
