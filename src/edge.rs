@@ -265,7 +265,7 @@ fn detect_edges(image: &image::GrayImage, sigma: f32) -> Vec<Vec<Edge>> {
                         // detected based on some background color outside image bounds.
                         let x = clamp(ix + kx, 0, width - 1);
                         let y = clamp(iy + ky, 0, height - 1);
-                        image.unsafe_get_pixel(x as u32, y as u32).data[0] as f32
+                        f32::from(image.unsafe_get_pixel(x as u32, y as u32).data[0])
                     };
                     sum_x += pix * k.0;
                     sum_y += pix * k.1;
@@ -372,7 +372,7 @@ fn hysteresis(edges: &Vec<Vec<Edge>>, strong_threshold: f32, weak_threshold: f32
 
             // Follow along the edge along both sides, preserving all edges which magnitude is at
             // least weak_threshold.
-            for side in [0.0, PI].into_iter() {
+            for side in &[0.0, PI] {
                 let mut current_pos = (x, y);
                 loop {
                     let edge = edges[current_pos.0][current_pos.1];
