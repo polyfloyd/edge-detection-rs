@@ -1,4 +1,4 @@
-use image::{self, GenericImage};
+use image::{self, GenericImageView};
 use rayon::prelude::*;
 use std::f32::consts::*;
 use std::*;
