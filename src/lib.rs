@@ -23,9 +23,6 @@
 //!
 //! See the `canny` function for details on what each parameter means.
 
-extern crate image;
-extern crate rayon;
-
 mod edge;
 
-pub use edge::*;
+pub use crate::edge::*;
