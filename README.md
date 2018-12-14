@@ -22,6 +22,6 @@ let detection = edge_detection::canny(
 );
 ```
 
-![Circle](media/demo-circle.png)
+![alt tag](https://raw.githubusercontent.com/polyfloyd/edge-detection-rs/master/media/demo-circle.png "Circle")
 
-![Peppers](media/demo-peppers.png)
+![alt tag](https://raw.githubusercontent.com/polyfloyd/edge-detection-rs/master/media/demo-peppers.png "Peppers")
