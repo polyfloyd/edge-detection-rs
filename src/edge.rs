@@ -400,7 +400,8 @@ fn hysteresis(
                     let edge = edges[current_pos.0][current_pos.1];
                     edges_out[current_pos.0][current_pos.1] = edge;
                     // Attempt to find the next line-segment of the edge in tree directions ahead.
-                    let (nb_pos, nb_magnitude) = [FRAC_PI_4, 0.0, -FRAC_PI_4].into_iter()
+                    let (nb_pos, nb_magnitude) = [FRAC_PI_4, 0.0, -FRAC_PI_4]
+                        .into_iter()
                         .map(|bearing| {
                             neighbour_pos_delta(edge.angle() + FRAC_PI_2 + side + bearing)
                         })
@@ -408,7 +409,8 @@ fn hysteresis(
                         .filter_map(|(nb_dx, nb_dy)| {
                             let nb_x = current_pos.0 as i32 + nb_dx;
                             let nb_y = current_pos.1 as i32 + nb_dy;
-                            if 0 <= nb_x && nb_x < width as i32 && 0 <= nb_y && nb_y < height as i32 {
+                            if 0 <= nb_x && nb_x < width as i32 && 0 <= nb_y && nb_y < height as i32
+                            {
                                 let nb = (nb_x as usize, nb_y as usize);
                                 Some((nb, edges[nb.0][nb.1].magnitude))
                             } else {
