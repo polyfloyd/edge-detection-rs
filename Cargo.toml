@@ -26,5 +26,5 @@ opt-level = 3
 unstable = []
 
 [dependencies]
-image = "0.21"
+image = "0.22"
 rayon = "1"

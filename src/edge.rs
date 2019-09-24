@@ -94,13 +94,11 @@ impl Detection {
                 };
                 (r + m, g + m, b + m)
             };
-            image::Rgb {
-                data: [
-                    (r * 255.0).round() as u8,
-                    (g * 255.0).round() as u8,
-                    (b * 255.0).round() as u8,
-                ],
-            }
+            image::Rgb([
+                (r * 255.0).round() as u8,
+                (g * 255.0).round() as u8,
+                (b * 255.0).round() as u8,
+            ])
         });
         image::DynamicImage::ImageRgb8(img)
     }
@@ -275,7 +273,7 @@ fn detect_edges(image: &image::GrayImage, sigma: f32) -> Vec<Vec<Edge>> {
                                 // detected based on some background color outside image bounds.
                                 let x = clamp(ix + kx, 0, width - 1);
                                 let y = clamp(iy + ky, 0, height - 1);
-                                f32::from(image.unsafe_get_pixel(x as u32, y as u32).data[0])
+                                f32::from(image.unsafe_get_pixel(x as u32, y as u32).0[0])
                             };
                             sum_x += pix * k.0;
                             sum_y += pix * k.1;
@@ -445,14 +443,12 @@ mod tests {
 
     fn edges_to_image(edges: &Vec<Vec<Edge>>) -> image::GrayImage {
         let (width, height) = (edges.len(), edges.first().unwrap().len());
-        let mut image =
-            image::GrayImage::from_pixel(width as u32, height as u32, image::Luma { data: [0] });
+        let mut image = image::GrayImage::from_pixel(width as u32, height as u32, image::Luma([0]));
         for x in 0..width {
             for y in 0..height {
                 let edge = edges[x][y];
-                *image.get_pixel_mut(x as u32, y as u32) = image::Luma {
-                    data: [(edge.magnitude * 255.0).round() as u8],
-                };
+                *image.get_pixel_mut(x as u32, y as u32) =
+                    image::Luma([(edge.magnitude * 255.0).round() as u8]);
             }
         }
         image
