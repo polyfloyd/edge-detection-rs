@@ -371,11 +371,7 @@ fn minmax_suppression(edges: &Detection, weak_threshold: f32) -> Vec<Vec<Edge>> 
 }
 
 /// Links lines together and discards noise.
-fn hysteresis(
-    edges: &Vec<Vec<Edge>>,
-    strong_threshold: f32,
-    weak_threshold: f32,
-) -> Vec<Vec<Edge>> {
+fn hysteresis(edges: &[Vec<Edge>], strong_threshold: f32, weak_threshold: f32) -> Vec<Vec<Edge>> {
     assert!(0.0 < strong_threshold && strong_threshold < 1.0);
     assert!(0.0 < weak_threshold && weak_threshold < 1.0);
     assert!(weak_threshold < strong_threshold);
@@ -399,7 +395,7 @@ fn hysteresis(
                     edges_out[current_pos.0][current_pos.1] = edge;
                     // Attempt to find the next line-segment of the edge in tree directions ahead.
                     let (nb_pos, nb_magnitude) = [FRAC_PI_4, 0.0, -FRAC_PI_4]
-                        .into_iter()
+                        .iter()
                         .map(|bearing| {
                             neighbour_pos_delta(edge.angle() + FRAC_PI_2 + side + bearing)
                         })
