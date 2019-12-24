@@ -1,7 +1,7 @@
 Edge Detection
 ==============
-[![Build Status](https://travis-ci.org/polyfloyd/edge-detection-rs.svg)](https://travis-ci.org/polyfloyd/edge-detection-rs)
-[![](https://img.shields.io/crates/v/edge-detection.svg)](https://crates.io/crates/edge-detection)
+[![Build Status](https://github.com/polyfloyd/edge-detection-rs/workflows/CI/badge.svg)](https://github.com/polyfloyd/edge-detection-rs/actions)
+[![Crate](https://img.shields.io/crates/v/edge-detection.svg)](https://crates.io/crates/edge-detection)
 [![Documentation](https://docs.rs/edge-detection/badge.svg)](https://docs.rs/edge-detection/)
 
 An implementation of the Canny edge detection algorithm in Rust. The base for
