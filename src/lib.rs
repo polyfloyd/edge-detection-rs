@@ -7,9 +7,6 @@
 //! # Finding the edges in an image
 //!
 //! ```
-//! extern crate edge_detection;
-//! extern crate image;
-//!
 //! let source_image = image::open("testdata/line-simple.png")
 //!     .expect("failed to read image")
 //!     .to_luma();
