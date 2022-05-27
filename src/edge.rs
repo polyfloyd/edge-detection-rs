@@ -458,7 +458,7 @@ mod tests {
     ) -> Detection {
         let path = path.as_ref();
         let image = image::open(path).unwrap();
-        let edges = detect_edges(&image.to_luma(), sigma);
+        let edges = detect_edges(&image.to_luma8(), sigma);
         let intermediage_d = Detection { edges };
         intermediage_d
             .as_image()
@@ -637,19 +637,19 @@ mod benchmarks {
 
     #[bench]
     fn bench_detect_edges_low_sigma(b: &mut test::Bencher) {
-        let image = image::open(IMG_PATH).unwrap().to_luma();
+        let image = image::open(IMG_PATH).unwrap().to_luma8();
         b.iter(|| detect_edges(&image, 1.2));
     }
 
     #[bench]
     fn bench_detect_edges_high_sigma(b: &mut test::Bencher) {
-        let image = image::open(IMG_PATH).unwrap().to_luma();
+        let image = image::open(IMG_PATH).unwrap().to_luma8();
         b.iter(|| detect_edges(&image, 5.0));
     }
 
     #[bench]
     fn bench_minmax_suppression_low_sigma(b: &mut test::Bencher) {
-        let image = image::open(IMG_PATH).unwrap().to_luma();
+        let image = image::open(IMG_PATH).unwrap().to_luma8();
         let edges = Detection {
             edges: detect_edges(&image, 1.2),
         };
@@ -658,7 +658,7 @@ mod benchmarks {
 
     #[bench]
     fn bench_minmax_suppression_high_sigma(b: &mut test::Bencher) {
-        let image = image::open(IMG_PATH).unwrap().to_luma();
+        let image = image::open(IMG_PATH).unwrap().to_luma8();
         let edges = Detection {
             edges: detect_edges(&image, 5.0),
         };
@@ -667,7 +667,7 @@ mod benchmarks {
 
     #[bench]
     fn bench_hysteresis(b: &mut test::Bencher) {
-        let image = image::open(IMG_PATH).unwrap().to_luma();
+        let image = image::open(IMG_PATH).unwrap().to_luma8();
         let edges = Detection {
             edges: detect_edges(&image, 1.2),
         };
